@@ -38,6 +38,17 @@ cargo test
 cargo fmt -- --check
 ```
 
+## 릴리스
+
+`v*` 형식의 버전 태그를 push하면 GitHub Actions가 Windows 릴리스를 생성합니다.
+
+```powershell
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Workflow는 `target\release\cheatsheet.exe`를 빌드하고 README 파일 2개와 함께 압축한 뒤, `CheatSheet-<tag>-windows-x64.zip`을 GitHub Release에 업로드합니다.
+
 ## 사용자 정의 단축키
 
 사용자 정의 단축키는 Windows 기준으로 다음 위치에 저장됩니다.

@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    name: Build Windows release
+    runs-on: windows-latest
+
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show Rust toolchain
+        run: |
+          rustc --version
+          cargo --version
+
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+      - name: Run tests
+        run: cargo test --locked
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Package release archive
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $dist = "dist"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Copy-Item -Path "target\release\cheatsheet.exe" -Destination "$dist\cheatsheet.exe"
+          Copy-Item -Path "README.md" -Destination "$dist\README.md"
+          Copy-Item -Path "README.ko.md" -Destination "$dist\README.ko.md"
+          Compress-Archive -Path "$dist\*" -DestinationPath "CheatSheet-$tag-windows-x64.zip" -Force
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          gh release create $tag "CheatSheet-$tag-windows-x64.zip" --title "CheatSheet $tag" --generate-notes --verify-tag

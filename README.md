@@ -38,6 +38,17 @@ Check formatting:
 cargo fmt -- --check
 ```
 
+## Release
+
+GitHub Actions creates a Windows release when a version tag matching `v*` is pushed.
+
+```powershell
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow builds `target\release\cheatsheet.exe`, packages it with both README files, and uploads `CheatSheet-<tag>-windows-x64.zip` to the GitHub Release.
+
 ## Custom Shortcuts
 
 On Windows, custom shortcuts are stored under:
