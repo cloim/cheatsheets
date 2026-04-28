@@ -1,57 +1,59 @@
 # CheatSheet
 
-Windows용 단축키 오버레이 앱입니다. 현재 활성 창의 프로세스 이름을 기준으로 기본 단축키와 사용자 정의 단축키를 보여줍니다.
+A Windows shortcut overlay app. CheatSheet detects the active window process and shows built-in and custom shortcuts for that process.
 
-## 주요 기능
+[한국어 README](README.ko.md)
 
-- `Ctrl+Shift+Space`로 오버레이 표시/숨김
-- 현재 활성 프로세스별 단축키 목록 표시
-- Windows 트레이 메뉴에서 설정 열기/종료
-- 테마, 투명도, 오버레이 단축키 설정 저장
-- 앱 안에서 사용자 정의 단축키 추가/수정
-- JSON/CSV 파일 가져오기
-- `Customs` 디렉터리의 사용자 정의 파일은 시작 시 파일 목록만 읽고, 해당 프로세스 오버레이가 필요할 때 내용만 지연 로드
+## Features
 
-## 실행
+- Show or hide the overlay with `Ctrl+Shift+Space`
+- Display shortcuts by active process
+- Open settings or quit from the Windows tray menu
+- Persist theme, opacity, overlay hotkey, and window placement settings
+- Add or update custom shortcuts in the app
+- Import shortcut files from JSON or CSV
+- Index files in the `Customs` directory at startup, then lazily load each file only when its process overlay is needed
+
+## Run
 
 ```powershell
 cargo run
 ```
 
-릴리스 빌드는 다음 명령을 사용합니다.
+Build a release binary:
 
 ```powershell
 cargo build --release
 ```
 
-## 테스트
+## Test
 
 ```powershell
 cargo test
 ```
 
-포맷 확인:
+Check formatting:
 
 ```powershell
 cargo fmt -- --check
 ```
 
-## 사용자 정의 단축키
+## Custom Shortcuts
 
-사용자 정의 단축키는 Windows 기준으로 다음 위치에 저장됩니다.
+On Windows, custom shortcuts are stored under:
 
 ```text
 %APPDATA%\CheatSheet\Customs
 ```
 
-파일명은 프로세스 app id가 됩니다.
+The file name becomes the process app id.
 
 ```text
 Customs\code.json
 Customs\chrome.json
 ```
 
-각 파일은 단축키 배열 JSON입니다.
+Each file is a JSON array of shortcuts.
 
 ```json
 [
@@ -63,11 +65,11 @@ Customs\chrome.json
 ]
 ```
 
-`group`이 비어 있으면 `Custom` 그룹으로 처리됩니다.
+If `group` is empty, CheatSheet uses the `Custom` group.
 
-## 가져오기 형식
+## Import Formats
 
-CSV는 현재 활성 프로세스에 단축키를 추가합니다.
+CSV imports shortcuts into the currently active process.
 
 ```csv
 combo,action,group
@@ -75,12 +77,12 @@ Ctrl+P,Open file by name,Navigation
 Ctrl+Shift+F,Search in files,Search
 ```
 
-JSON은 단일 앱 배열 형식 또는 여러 앱을 담은 카탈로그 형식을 사용할 수 있습니다.
+JSON imports can use either a single-app shortcut array or a multi-app catalog format.
 
-## 개발 메모
+## Development Notes
 
 - Rust 2024 edition
 - GUI: `eframe`/`egui`
-- 전역 단축키: `global-hotkey`
-- 트레이 아이콘: `tray-icon`
-- Windows 활성 창 감지: `windows` crate
+- Global hotkeys: `global-hotkey`
+- Tray icon: `tray-icon`
+- Windows active-window detection: `windows` crate
