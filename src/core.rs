@@ -118,7 +118,7 @@ impl Catalog {
             .push(patch);
     }
 
-    pub fn sheet_for(&self, app_id: &str) -> CheatSheet {
+    pub fn sheet_for(&self, app_id: &str) -> ShortcutSheet {
         let app_id = normalize_app_id(app_id);
         let mut disabled = BTreeSet::new();
         let mut entries: BTreeMap<String, ShortcutEntry> = BTreeMap::new();
@@ -148,7 +148,7 @@ impl Catalog {
             .collect();
         shortcuts.sort_by(|a, b| a.group.cmp(&b.group).then(a.combo.cmp(&b.combo)));
 
-        CheatSheet { app_id, shortcuts }
+        ShortcutSheet { app_id, shortcuts }
     }
 
     pub fn merge_user_catalog(&mut self, user_catalog: UserCatalog) {
@@ -216,7 +216,7 @@ pub struct UserCatalog {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CheatSheet {
+pub struct ShortcutSheet {
     pub app_id: String,
     pub shortcuts: Vec<ShortcutEntry>,
 }

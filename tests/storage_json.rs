@@ -1,5 +1,5 @@
-use cheatsheet::core::{ShortcutEntry, ShortcutSource, UserCatalog, UserShortcutPatch};
-use cheatsheet::storage::{
+use cheatsheets::core::{ShortcutEntry, ShortcutSource, UserCatalog, UserShortcutPatch};
+use cheatsheets::storage::{
     parse_user_catalog_json, serialize_user_catalog_json, user_catalog_json_needs_migration,
 };
 use std::collections::BTreeMap;

@@ -7,26 +7,29 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+const APP_CONFIG_DIR: &str = "CheatSheets";
+
 pub fn user_catalog_path() -> PathBuf {
-    config_file_path("CheatSheet", "shortcuts.json")
+    config_file_path("shortcuts.json")
 }
 
 pub fn user_customs_dir() -> PathBuf {
-    config_dir("CheatSheet").join("Customs")
+    config_dir().join("Customs")
 }
 
 pub fn app_settings_path() -> PathBuf {
-    config_file_path("CheatSheet", "settings.json")
+    config_file_path("settings.json")
 }
 
-fn config_file_path(app_dir: &str, file_name: &str) -> PathBuf {
-    config_dir(app_dir).join(file_name)
+fn config_file_path(file_name: &str) -> PathBuf {
+    config_dir().join(file_name)
 }
 
-fn config_dir(app_dir: &str) -> PathBuf {
-    dirs::config_dir()
+fn config_dir() -> PathBuf {
+    dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(app_dir)
+        .join(".config")
+        .join(APP_CONFIG_DIR)
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

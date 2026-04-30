@@ -1,4 +1,4 @@
-use cheatsheet::storage::{AppSettings, WindowPlacement};
+use cheatsheets::storage::{AppSettings, WindowPlacement};
 
 #[test]
 fn app_settings_loads_window_placement_from_json() {

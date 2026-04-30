@@ -40,10 +40,10 @@ jobs:
           $tag = "${{ github.ref_name }}"
           $dist = "dist"
           New-Item -ItemType Directory -Force -Path $dist | Out-Null
-          Copy-Item -Path "target\release\cheatsheet.exe" -Destination "$dist\cheatsheet.exe"
+          Copy-Item -Path "target\release\cheatsheets.exe" -Destination "$dist\cheatsheets.exe"
           Copy-Item -Path "README.md" -Destination "$dist\README.md"
           Copy-Item -Path "README.ko.md" -Destination "$dist\README.ko.md"
-          Compress-Archive -Path "$dist\*" -DestinationPath "CheatSheet-$tag-windows-x64.zip" -Force
+          Compress-Archive -Path "$dist\*" -DestinationPath "CheatSheets-$tag-windows-x64.zip" -Force
 
       - name: Create GitHub release
         env:
@@ -51,4 +51,4 @@ jobs:
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
-          gh release create $tag "CheatSheet-$tag-windows-x64.zip" --title "CheatSheet $tag" --generate-notes --verify-tag
+          gh release create $tag "CheatSheets-$tag-windows-x64.zip" --title "CheatSheets $tag" --generate-notes --verify-tag

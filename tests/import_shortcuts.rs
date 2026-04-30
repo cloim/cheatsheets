@@ -1,5 +1,5 @@
-use cheatsheet::core::UserShortcutPatch;
-use cheatsheet::import::{ImportFormat, parse_shortcut_import};
+use cheatsheets::core::UserShortcutPatch;
+use cheatsheets::import::{ImportFormat, parse_shortcut_import};
 
 #[test]
 fn imports_csv_rows_into_active_app_as_user_shortcuts() {
@@ -64,7 +64,7 @@ fn imports_json_user_catalog_and_counts_patches() {
         panic!("expected replace patch");
     };
     assert_eq!(entry.combo, "Ctrl+P");
-    assert_eq!(entry.source, cheatsheet::core::ShortcutSource::User);
+    assert_eq!(entry.source, cheatsheets::core::ShortcutSource::User);
 }
 
 #[test]
@@ -93,7 +93,7 @@ fn imports_simplified_json_user_catalog() {
         panic!("expected replace patch");
     };
     assert_eq!(entry.combo, "Ctrl+P");
-    assert_eq!(entry.source, cheatsheet::core::ShortcutSource::User);
+    assert_eq!(entry.source, cheatsheets::core::ShortcutSource::User);
 }
 
 #[test]

@@ -17,14 +17,14 @@ use tray_icon::{
     menu::{Menu, MenuEvent, MenuItem},
 };
 
-const APP_NAME: &str = "CheatSheet";
-const TRAY_MENU_SETTINGS: &str = "cheatsheet.settings";
-const TRAY_MENU_CLOSE: &str = "cheatsheet.close";
+const APP_NAME: &str = "CheatSheets";
+const TRAY_MENU_SETTINGS: &str = "cheatsheets.settings";
+const TRAY_MENU_CLOSE: &str = "cheatsheets.close";
 const KOREAN_FONT_REGULAR: &str = "malgun_gothic";
 const KOREAN_FONT_BOLD: &str = "malgun_gothic_bold";
 const KOREAN_BOLD_FONT_FAMILY: &str = "korean_bold";
 
-pub struct CheatSheetApp {
+pub struct CheatSheetsApp {
     catalog: Catalog,
     active: AppIdentity,
     visible: bool,
@@ -50,7 +50,7 @@ pub struct CheatSheetApp {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AppView {
-    CheatSheet,
+    Shortcuts,
     Settings,
 }
 
@@ -66,7 +66,7 @@ enum TrayMenuAction {
     Close,
 }
 
-impl CheatSheetApp {
+impl CheatSheetsApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let catalog = Catalog::with_builtins();
         let (custom_index, mut status) = match storage::load_user_catalog_index() {
@@ -107,7 +107,7 @@ impl CheatSheetApp {
             custom_index,
             loaded_custom_apps: BTreeSet::new(),
             settings,
-            view: AppView::CheatSheet,
+            view: AppView::Shortcuts,
             capture_target: None,
             status,
             draft_combo: String::new(),
@@ -211,7 +211,7 @@ impl CheatSheetApp {
                 let will_show = !self.visible;
                 if will_show {
                     self.active = platform::active_window().unwrap_or_else(AppIdentity::unknown);
-                    self.view = AppView::CheatSheet;
+                    self.view = AppView::Shortcuts;
                 }
                 self.visible = will_show;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(self.visible));
@@ -373,7 +373,7 @@ impl CheatSheetApp {
             ui.heading(egui::RichText::new("설정").color(palette.heading));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("오버레이").clicked() {
-                    self.view = AppView::CheatSheet;
+                    self.view = AppView::Shortcuts;
                 }
             });
         });
@@ -512,7 +512,7 @@ impl CheatSheetApp {
         Ok(())
     }
 
-    fn show_cheatsheet(&mut self, ui: &mut egui::Ui, palette: UiPalette) {
+    fn show_shortcuts(&mut self, ui: &mut egui::Ui, palette: UiPalette) {
         let active_app_id = normalize_app_id(&self.active.app_id);
         if let Err(error) = self.ensure_user_shortcuts_loaded(&active_app_id) {
             self.status = format!("사용자 정의 단축키를 읽지 못했습니다: {error:#}");
@@ -990,7 +990,7 @@ fn apply_palette_to_visuals(visuals: &mut egui::Visuals, palette: UiPalette) {
     visuals.widgets.open.bg_stroke = no_stroke;
 }
 
-impl eframe::App for CheatSheetApp {
+impl eframe::App for CheatSheetsApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.remember_repaint_context(ctx);
         self.poll_hotkey(ctx);
@@ -1029,7 +1029,7 @@ impl eframe::App for CheatSheetApp {
             |ui| {
                 ui.set_min_size(ui.available_size());
                 match self.view {
-                    AppView::CheatSheet => self.show_cheatsheet(ui, palette),
+                    AppView::Shortcuts => self.show_shortcuts(ui, palette),
                     AppView::Settings => self.show_settings(ui, &ctx, palette),
                 }
             },

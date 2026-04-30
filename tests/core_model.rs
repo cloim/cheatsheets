@@ -1,4 +1,4 @@
-use cheatsheet::core::{AppIdentity, Catalog, ShortcutEntry, ShortcutSource, UserShortcutPatch};
+use cheatsheets::core::{AppIdentity, Catalog, ShortcutEntry, ShortcutSource, UserShortcutPatch};
 
 #[test]
 fn app_identity_uses_lowercase_executable_stem_as_app_id() {

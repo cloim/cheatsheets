@@ -1,10 +1,21 @@
-use cheatsheet::core::{ShortcutEntry, ShortcutSource, UserCatalog, UserShortcutPatch};
-use cheatsheet::storage::{
-    load_app_user_catalog_from_customs_index, load_user_catalog_from_customs_dir,
-    load_user_catalog_index_from_customs_dir, save_user_catalog_to_customs_dir,
-    serialize_app_shortcuts_json,
+use cheatsheets::core::{ShortcutEntry, ShortcutSource, UserCatalog, UserShortcutPatch};
+use cheatsheets::storage::{
+    app_settings_path, load_app_user_catalog_from_customs_index,
+    load_user_catalog_from_customs_dir, load_user_catalog_index_from_customs_dir,
+    save_user_catalog_to_customs_dir, serialize_app_shortcuts_json, user_customs_dir,
 };
 use std::collections::BTreeMap;
+
+#[test]
+fn stores_runtime_files_under_home_config_cheatsheets() {
+    let config_dir = dirs::home_dir()
+        .unwrap()
+        .join(".config")
+        .join("CheatSheets");
+
+    assert_eq!(user_customs_dir(), config_dir.join("Customs"));
+    assert_eq!(app_settings_path(), config_dir.join("settings.json"));
+}
 
 #[test]
 fn saves_each_app_to_its_own_custom_json_file() {

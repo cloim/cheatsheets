@@ -1,7 +1,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use cheatsheet::app::CheatSheetApp;
-use cheatsheet::storage::{self, WindowPlacement};
+use cheatsheets::app::CheatSheetsApp;
+use cheatsheets::storage::{self, WindowPlacement};
 use eframe::egui;
 
 fn main() -> Result<(), eframe::Error> {
@@ -15,7 +15,7 @@ fn main() -> Result<(), eframe::Error> {
         ]);
 
     let mut viewport = egui::ViewportBuilder::default()
-        .with_title("CheatSheet")
+        .with_title("CheatSheets")
         .with_inner_size(size)
         .with_min_inner_size([WindowPlacement::MIN_WIDTH, WindowPlacement::MIN_HEIGHT])
         .with_decorations(true)
@@ -32,8 +32,8 @@ fn main() -> Result<(), eframe::Error> {
     };
 
     eframe::run_native(
-        "CheatSheet",
+        "CheatSheets",
         native_options,
-        Box::new(|cc| Ok(Box::new(CheatSheetApp::new(cc)))),
+        Box::new(|cc| Ok(Box::new(CheatSheetsApp::new(cc)))),
     )
 }

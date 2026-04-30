@@ -1,6 +1,6 @@
-# CheatSheet
+# CheatSheets
 
-A Windows shortcut overlay app. CheatSheet detects the active window process and shows built-in and custom shortcuts for that process.
+A Windows shortcut overlay app. CheatSheets detects the active window process and shows built-in and custom shortcuts for that process.
 
 [한국어 README](README.ko.md)
 
@@ -47,14 +47,14 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The workflow builds `target\release\cheatsheet.exe`, packages it with both README files, and uploads `CheatSheet-<tag>-windows-x64.zip` to the GitHub Release.
+The workflow builds `target\release\cheatsheets.exe`, packages it with both README files, and uploads `CheatSheets-<tag>-windows-x64.zip` to the GitHub Release.
 
 ## Custom Shortcuts
 
-On Windows, custom shortcuts are stored under:
+Custom shortcuts are stored under:
 
 ```text
-%APPDATA%\CheatSheet\Customs
+~\.config\CheatSheets\Customs
 ```
 
 The file name becomes the process app id.
@@ -76,7 +76,7 @@ Each file is a JSON array of shortcuts.
 ]
 ```
 
-If `group` is empty, CheatSheet uses the `Custom` group.
+If `group` is empty, CheatSheets uses the `Custom` group.
 
 ## Import Formats
 

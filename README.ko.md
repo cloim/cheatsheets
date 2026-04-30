@@ -1,4 +1,4 @@
-# CheatSheet
+# CheatSheets
 
 Windows용 단축키 오버레이 앱입니다. 현재 활성 창의 프로세스 이름을 기준으로 기본 단축키와 사용자 정의 단축키를 보여줍니다.
 
@@ -47,14 +47,14 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-Workflow는 `target\release\cheatsheet.exe`를 빌드하고 README 파일 2개와 함께 압축한 뒤, `CheatSheet-<tag>-windows-x64.zip`을 GitHub Release에 업로드합니다.
+Workflow는 `target\release\cheatsheets.exe`를 빌드하고 README 파일 2개와 함께 압축한 뒤, `CheatSheets-<tag>-windows-x64.zip`을 GitHub Release에 업로드합니다.
 
 ## 사용자 정의 단축키
 
-사용자 정의 단축키는 Windows 기준으로 다음 위치에 저장됩니다.
+사용자 정의 단축키는 다음 위치에 저장됩니다.
 
 ```text
-%APPDATA%\CheatSheet\Customs
+~\.config\CheatSheets\Customs
 ```
 
 파일명은 프로세스 app id가 됩니다.
