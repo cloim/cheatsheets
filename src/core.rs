@@ -160,6 +160,19 @@ impl Catalog {
         }
     }
 
+    pub fn replace_user_patches(
+        &mut self,
+        app_id: impl Into<String>,
+        patches: Vec<UserShortcutPatch>,
+    ) {
+        let app_id = normalize_app_id(app_id.into());
+        if patches.is_empty() {
+            self.user.remove(&app_id);
+        } else {
+            self.user.insert(app_id, patches);
+        }
+    }
+
     pub fn user_catalog(&self) -> UserCatalog {
         UserCatalog {
             apps: self.user.clone(),

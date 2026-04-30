@@ -109,6 +109,39 @@ fn loads_only_requested_app_from_customs_index() {
 }
 
 #[test]
+fn app_catalog_loader_reads_latest_file_contents_each_call() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("Code.json");
+    std::fs::write(
+        &path,
+        r#"[{"combo":"ctrl+p","action":"Open file","group":"Navigation"}]"#,
+    )
+    .unwrap();
+
+    let index = load_user_catalog_index_from_customs_dir(temp.path()).unwrap();
+    let first = load_app_user_catalog_from_customs_index(&index, "code").unwrap();
+    std::fs::write(
+        &path,
+        r#"[{"combo":"ctrl+r","action":"Reload window","group":"Window"}]"#,
+    )
+    .unwrap();
+    let second = load_app_user_catalog_from_customs_index(&index, "code").unwrap();
+
+    let UserShortcutPatch::Replace { entry: first_entry } = &first.apps["code"][0] else {
+        panic!("expected replace patch");
+    };
+    let UserShortcutPatch::Replace {
+        entry: second_entry,
+    } = &second.apps["code"][0]
+    else {
+        panic!("expected replace patch");
+    };
+
+    assert_eq!(first_entry.combo, "Ctrl+P");
+    assert_eq!(second_entry.combo, "Ctrl+R");
+}
+
+#[test]
 fn serializes_single_app_as_shortcut_array() {
     let patches = vec![UserShortcutPatch::replace(ShortcutEntry::new(
         "Ctrl+P",

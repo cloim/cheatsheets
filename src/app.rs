@@ -8,7 +8,7 @@ use anyhow::{Context, Result, anyhow};
 use eframe::egui;
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState, hotkey::HotKey};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     fs,
     sync::{Arc, Mutex, mpsc},
 };
@@ -36,7 +36,6 @@ pub struct CheatSheetsApp {
     tray_icon: Option<TrayIcon>,
     tray_rx: mpsc::Receiver<TrayMenuAction>,
     custom_index: storage::UserCatalogIndex,
-    loaded_custom_apps: BTreeSet<String>,
     settings: AppSettings,
     view: AppView,
     capture_target: Option<CaptureTarget>,
@@ -105,7 +104,6 @@ impl CheatSheetsApp {
             tray_icon: None,
             tray_rx,
             custom_index,
-            loaded_custom_apps: BTreeSet::new(),
             settings,
             view: AppView::Shortcuts,
             capture_target: None,
@@ -264,7 +262,14 @@ impl CheatSheetsApp {
 
     fn persist_user_catalog(&mut self) {
         match storage::save_user_catalog(&self.catalog.user_catalog()) {
-            Ok(path) => self.status = format!("저장했습니다: {}", path.display()),
+            Ok(path) => match self.refresh_custom_index() {
+                Ok(()) => self.status = format!("저장했습니다: {}", path.display()),
+                Err(error) => {
+                    self.status = format!(
+                        "저장했지만 사용자 정의 파일 목록을 다시 읽지 못했습니다: {error:#}"
+                    )
+                }
+            },
             Err(error) => self.status = format!("저장 실패: {error:#}"),
         }
     }
@@ -332,6 +337,7 @@ impl CheatSheetsApp {
             }
             self.catalog.merge_user_catalog(import.catalog);
             storage::save_user_catalog(&self.catalog.user_catalog())?;
+            self.refresh_custom_index()?;
             Ok(imported_count)
         })();
 
@@ -495,28 +501,41 @@ impl CheatSheetsApp {
         }
     }
 
+    fn refresh_custom_index(&mut self) -> Result<()> {
+        self.custom_index = storage::load_user_catalog_index()?;
+        Ok(())
+    }
+
     fn ensure_user_shortcuts_loaded(&mut self, app_id: &str) -> Result<()> {
         let app_id = normalize_app_id(app_id);
-        if self.loaded_custom_apps.contains(&app_id) {
-            return Ok(());
-        }
         if !self.custom_index.has_app(&app_id) {
-            self.loaded_custom_apps.insert(app_id);
+            self.catalog.replace_user_patches(app_id, Vec::new());
             return Ok(());
         }
 
-        let user_catalog =
+        let mut user_catalog =
             storage::load_app_user_catalog_from_customs_index(&self.custom_index, &app_id)?;
-        self.catalog.merge_user_catalog(user_catalog);
-        self.loaded_custom_apps.insert(app_id);
+        let patches = user_catalog.apps.remove(&app_id).unwrap_or_default();
+        self.catalog.replace_user_patches(&app_id, patches);
         Ok(())
+    }
+
+    fn load_user_shortcuts_for_overlay(&mut self) {
+        let active_app_id = normalize_app_id(&self.active.app_id);
+        match self
+            .refresh_custom_index()
+            .and_then(|()| self.ensure_user_shortcuts_loaded(&active_app_id))
+        {
+            Ok(()) => {}
+            Err(error) => {
+                self.status = format!("사용자 정의 단축키를 읽지 못했습니다: {error:#}");
+            }
+        }
     }
 
     fn show_shortcuts(&mut self, ui: &mut egui::Ui, palette: UiPalette) {
         let active_app_id = normalize_app_id(&self.active.app_id);
-        if let Err(error) = self.ensure_user_shortcuts_loaded(&active_app_id) {
-            self.status = format!("사용자 정의 단축키를 읽지 못했습니다: {error:#}");
-        }
+        self.load_user_shortcuts_for_overlay();
         let sheet = self.catalog.sheet_for(&active_app_id);
         ui.add_space(4.0);
         ui.label(

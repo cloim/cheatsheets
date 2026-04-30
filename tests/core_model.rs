@@ -73,3 +73,36 @@ fn user_disabled_shortcut_hides_matching_builtin() {
 
     assert_eq!(combos, vec!["Ctrl+P"]);
 }
+
+#[test]
+fn user_shortcut_reload_replaces_previous_app_patches() {
+    let mut catalog = Catalog::default();
+    catalog.replace_user_patches(
+        "code",
+        vec![UserShortcutPatch::replace(ShortcutEntry::new(
+            "Ctrl+P",
+            "Open file",
+            "Navigation",
+            ShortcutSource::User,
+        ))],
+    );
+
+    catalog.replace_user_patches(
+        "code",
+        vec![UserShortcutPatch::replace(ShortcutEntry::new(
+            "Ctrl+R",
+            "Reload window",
+            "Window",
+            ShortcutSource::User,
+        ))],
+    );
+
+    let sheet = catalog.sheet_for("code");
+    let combos: Vec<_> = sheet
+        .shortcuts
+        .iter()
+        .map(|entry| entry.combo.as_str())
+        .collect();
+
+    assert_eq!(combos, vec!["Ctrl+R"]);
+}
