@@ -57,6 +57,22 @@ enum AppView {
     Settings,
 }
 
+fn paints_full_window_background(view: AppView) -> bool {
+    matches!(view, AppView::Settings)
+}
+
+fn viewport_decorations_for_view(view: AppView) -> bool {
+    matches!(view, AppView::Settings)
+}
+
+fn viewport_resizable_for_view(view: AppView) -> bool {
+    matches!(view, AppView::Settings)
+}
+
+fn transparent_clear_color() -> [f32; 4] {
+    egui::Color32::TRANSPARENT.to_normalized_gamma_f32()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CaptureTarget {
     ToggleHotkey,
@@ -212,6 +228,7 @@ impl CheatSheetsApp {
                 if will_show {
                     self.active = platform::active_window().unwrap_or_else(AppIdentity::unknown);
                     self.view = AppView::Shortcuts;
+                    apply_viewport_chrome(ctx, self.view);
                 }
                 self.visible = will_show;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(self.visible));
@@ -226,6 +243,7 @@ impl CheatSheetsApp {
                 TrayMenuAction::Settings => {
                     self.view = AppView::Settings;
                     self.visible = true;
+                    apply_viewport_chrome(ctx, self.view);
                     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                     ctx.request_repaint();
@@ -553,48 +571,267 @@ impl CheatSheetsApp {
         }
     }
 
-    fn show_shortcuts(&mut self, ui: &mut egui::Ui, palette: UiPalette) {
+    fn show_shortcuts(&mut self, ui: &mut egui::Ui) {
         let active_app_id = normalize_app_id(&self.active.app_id);
         self.load_user_shortcuts_for_overlay();
         let sheet = self
             .catalog
             .sheet_for_with_config(&active_app_id, &self.active_app_sheet_config);
-        ui.add_space(4.0);
-        ui.label(
-            egui::RichText::new(&sheet.display_name)
-                .size(26.0)
-                .strong()
-                .color(palette.heading),
+        let palette = shortcut_card_palette(self.settings.opacity);
+        let card_rect = ui.max_rect().shrink(shortcut_card_outer_inset(self.view));
+        ui.painter()
+            .rect_filled(card_rect, SHORTCUT_CARD_RADIUS, palette.fill);
+        ui.painter().rect_stroke(
+            card_rect,
+            SHORTCUT_CARD_RADIUS,
+            egui::Stroke::new(1.0, palette.border),
+            egui::StrokeKind::Inside,
         );
-        if let Some(description) = sheet.description.as_deref() {
-            ui.add_space(4.0);
-            ui.label(
-                egui::RichText::new(description)
-                    .size(13.0)
-                    .color(palette.weak_text),
-            );
+        let grip_rect = resize_grip_rect(card_rect);
+        let resize_response = show_resize_grip(ui, grip_rect, palette);
+        if resize_response.dragged() {
+            let current_size = current_viewport_size(ui.ctx()).unwrap_or(card_rect.size());
+            let resized = resized_overlay_size(current_size, resize_response.drag_delta());
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::InnerSize(resized));
         }
-        ui.add_space(22.0);
+        let drag_response = ui.interact(
+            card_rect,
+            ui.id().with("shortcut_card_drag"),
+            shortcut_card_drag_sense(),
+        );
+        let pointer_in_resize_grip = ui
+            .ctx()
+            .pointer_latest_pos()
+            .is_some_and(|pos| grip_rect.contains(pos));
+        if drag_response.drag_started()
+            && !pointer_in_resize_grip
+            && !resize_response.drag_started()
+            && !resize_response.dragged()
+        {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        }
 
-        if sheet.shortcuts.is_empty() {
-            ui.centered_and_justified(|ui| {
+        let content_rect = card_rect.shrink(SHORTCUT_CARD_PADDING);
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(content_rect)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+            |ui| {
+                ui.add_space(2.0);
                 ui.label(
-                    egui::RichText::new("등록된 단축키가 없습니다.")
-                        .size(16.0)
-                        .color(palette.weak_text),
+                    egui::RichText::new(&sheet.display_name)
+                        .size(18.0)
+                        .strong()
+                        .color(palette.heading),
                 );
-            });
-            return;
-        }
+                if let Some(description) = sheet.description.as_deref() {
+                    ui.add_space(3.0);
+                    ui.label(
+                        egui::RichText::new(description)
+                            .size(12.0)
+                            .color(palette.weak_text),
+                    );
+                }
+                ui.add_space(18.0);
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            show_shortcut_columns(ui, &sheet.shortcuts, palette);
-        });
+                if sheet.shortcuts.is_empty() {
+                    ui.centered_and_justified(|ui| {
+                        ui.label(
+                            egui::RichText::new("등록된 단축키가 없습니다.")
+                                .size(14.0)
+                                .color(palette.weak_text),
+                        );
+                    });
+                    return;
+                }
+
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    show_shortcut_columns(ui, &sheet.shortcuts, palette);
+                });
+            },
+        );
+    }
+}
+
+const SHORTCUT_CARD_PADDING: f32 = 24.0;
+const SHORTCUT_CARD_RADIUS: f32 = 6.0;
+const SHORTCUT_COMBO_WIDTH: f32 = 112.0;
+const SHORTCUT_ROW_HEIGHT: f32 = 18.0;
+const SHORTCUT_ACTION_GAP: f32 = 8.0;
+const KEYCAP_HEIGHT: f32 = 16.0;
+const KEYCAP_GAP: f32 = 3.0;
+const KEYCAP_TEXT_Y_OFFSET: f32 = -0.75;
+const RESIZE_GRIP_SIZE: f32 = 18.0;
+const RESIZE_GRIP_INSET: f32 = 6.0;
+
+#[derive(Debug, Clone, Copy)]
+struct ShortcutCardPalette {
+    fill: egui::Color32,
+    border: egui::Color32,
+    heading: egui::Color32,
+    group_heading: egui::Color32,
+    text: egui::Color32,
+    weak_text: egui::Color32,
+    divider: egui::Color32,
+    keycap_fill: egui::Color32,
+    keycap_border: egui::Color32,
+    keycap_text: egui::Color32,
+}
+
+fn shortcut_card_palette(opacity: f32) -> ShortcutCardPalette {
+    let fill_alpha = (opacity.clamp(0.55, 1.0) * 242.0).round() as u8;
+    let border_alpha = (opacity.clamp(0.55, 1.0) * 170.0).round() as u8;
+    ShortcutCardPalette {
+        fill: egui::Color32::from_rgba_unmultiplied(252, 251, 247, fill_alpha),
+        border: egui::Color32::from_rgba_unmultiplied(210, 210, 205, border_alpha),
+        heading: egui::Color32::from_rgb(42, 42, 38),
+        group_heading: egui::Color32::from_rgb(34, 34, 31),
+        text: egui::Color32::from_rgb(52, 52, 48),
+        weak_text: egui::Color32::from_rgb(118, 116, 108),
+        divider: egui::Color32::from_rgba_unmultiplied(202, 202, 196, 140),
+        keycap_fill: egui::Color32::from_rgba_unmultiplied(246, 245, 241, 230),
+        keycap_border: egui::Color32::from_rgba_unmultiplied(170, 170, 164, 170),
+        keycap_text: egui::Color32::from_rgb(44, 44, 40),
+    }
+}
+
+fn view_content_inset(view: AppView) -> f32 {
+    match view {
+        AppView::Shortcuts => 0.0,
+        AppView::Settings => 28.0,
+    }
+}
+
+fn shortcut_card_outer_inset(view: AppView) -> f32 {
+    match view {
+        AppView::Shortcuts => 0.0,
+        AppView::Settings => 14.0,
+    }
+}
+
+fn keycap_width(label: &str) -> f32 {
+    (label.chars().count() as f32 * 5.8 + 9.0).max(16.0)
+}
+
+fn keycap_text_position(rect: egui::Rect) -> egui::Pos2 {
+    rect.center() + egui::vec2(0.0, KEYCAP_TEXT_Y_OFFSET)
+}
+
+fn combo_keycap_width(parts: &[&str]) -> f32 {
+    let labels_width = parts.iter().map(|part| keycap_width(part)).sum::<f32>();
+    let gaps = parts.len().saturating_sub(1) as f32 * KEYCAP_GAP;
+    labels_width + gaps
+}
+
+fn shortcut_card_drag_sense() -> egui::Sense {
+    egui::Sense::drag()
+}
+
+fn resize_grip_rect(card_rect: egui::Rect) -> egui::Rect {
+    let max = card_rect.max - egui::vec2(RESIZE_GRIP_INSET, RESIZE_GRIP_INSET);
+    egui::Rect::from_min_max(max - egui::vec2(RESIZE_GRIP_SIZE, RESIZE_GRIP_SIZE), max)
+}
+
+fn resized_overlay_size(current_size: egui::Vec2, drag_delta: egui::Vec2) -> egui::Vec2 {
+    egui::vec2(
+        (current_size.x + drag_delta.x).max(WindowPlacement::MIN_WIDTH),
+        (current_size.y + drag_delta.y).max(WindowPlacement::MIN_HEIGHT),
+    )
+}
+
+fn current_viewport_size(ctx: &egui::Context) -> Option<egui::Vec2> {
+    ctx.input(|input| input.viewport().inner_rect.map(|rect| rect.size()))
+}
+
+fn show_resize_grip(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    palette: ShortcutCardPalette,
+) -> egui::Response {
+    let response = ui
+        .interact(
+            rect,
+            ui.id().with("shortcut_resize_grip"),
+            egui::Sense::drag(),
+        )
+        .on_hover_cursor(egui::CursorIcon::ResizeNwSe);
+
+    let stroke = egui::Stroke::new(1.0, palette.weak_text.gamma_multiply(0.55));
+    for offset in [4.0, 8.0, 12.0] {
+        ui.painter().line_segment(
+            [
+                egui::pos2(rect.right() - offset, rect.bottom() - 2.0),
+                egui::pos2(rect.right() - 2.0, rect.bottom() - offset),
+            ],
+            stroke,
+        );
+    }
+    response
+}
+
+fn shortcut_action_layout() -> egui::Layout {
+    let mut layout = egui::Layout::left_to_right(egui::Align::Center);
+    layout.main_align = egui::Align::LEFT;
+    layout
+}
+
+fn keycap_combo_start_x(rect_left: f32, rect_right: f32, parts: &[&str]) -> f32 {
+    let total_width = combo_keycap_width(parts);
+    let start_x = rect_right - total_width;
+    if total_width > rect_right - rect_left {
+        start_x
+    } else {
+        start_x.max(rect_left)
+    }
+}
+
+fn show_keycap_combo(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    combo: &str,
+    palette: ShortcutCardPalette,
+) {
+    let parts = combo_keycap_parts(combo);
+    if parts.is_empty() {
+        return;
+    }
+
+    let mut x = keycap_combo_start_x(rect.left(), rect.right(), &parts);
+    let y = rect.center().y - KEYCAP_HEIGHT / 2.0;
+    for part in parts {
+        let width = keycap_width(part);
+        let key_rect =
+            egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(width, KEYCAP_HEIGHT));
+        ui.painter().rect_filled(key_rect, 3.0, palette.keycap_fill);
+        ui.painter().rect_stroke(
+            key_rect,
+            3.0,
+            egui::Stroke::new(0.8, palette.keycap_border),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter().text(
+            keycap_text_position(key_rect),
+            egui::Align2::CENTER_CENTER,
+            part,
+            egui::FontId::monospace(9.5),
+            palette.keycap_text,
+        );
+        x += width + KEYCAP_GAP;
     }
 }
 
 fn is_toggle_event(hotkey: Option<HotKey>, event: GlobalHotKeyEvent) -> bool {
     Some(event.id) == hotkey.map(|hotkey| hotkey.id()) && event.state == HotKeyState::Pressed
+}
+
+fn apply_viewport_chrome(ctx: &egui::Context, view: AppView) {
+    ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(
+        viewport_decorations_for_view(view),
+    ));
+    ctx.send_viewport_cmd(egui::ViewportCommand::Resizable(
+        viewport_resizable_for_view(view),
+    ));
 }
 
 fn parse_hotkey_for_registration(combo: &str) -> Result<HotKey> {
@@ -785,25 +1022,41 @@ fn settings_section(
     add_contents(ui);
 }
 
-fn show_shortcut_columns(ui: &mut egui::Ui, shortcuts: &[ShortcutEntry], palette: UiPalette) {
+fn show_shortcut_columns(
+    ui: &mut egui::Ui,
+    shortcuts: &[ShortcutEntry],
+    palette: ShortcutCardPalette,
+) {
     let grouped = grouped_shortcuts(shortcuts);
     let available_width = ui.available_width();
-    let column_count = if available_width >= 1120.0 {
+    let column_count = if available_width >= 980.0 {
         4
-    } else if available_width >= 820.0 {
+    } else if available_width >= 720.0 {
         3
-    } else if available_width >= 560.0 {
+    } else if available_width >= 480.0 {
         2
     } else {
         1
     };
 
     ui.columns(column_count, |columns| {
+        let visible_column_count = column_count.min(grouped.len());
+        for column in columns.iter().take(visible_column_count.saturating_sub(1)) {
+            let rect = column.max_rect();
+            column.painter().line_segment(
+                [
+                    egui::pos2(rect.right(), rect.top() + 4.0),
+                    egui::pos2(rect.right(), rect.bottom() - 4.0),
+                ],
+                egui::Stroke::new(1.0, palette.divider),
+            );
+        }
+
         for (group_index, (group, entries)) in grouped.iter().enumerate() {
             let column_index = group_index % column_count;
             let column = &mut columns[column_index];
             if group_index >= column_count {
-                column.add_space(22.0);
+                column.add_space(16.0);
             }
             column.label(
                 egui::RichText::new(group)
@@ -811,27 +1064,39 @@ fn show_shortcut_columns(ui: &mut egui::Ui, shortcuts: &[ShortcutEntry], palette
                     .strong()
                     .color(palette.group_heading),
             );
-            column.add_space(8.0);
+            column.add_space(6.0);
             for entry in entries {
                 column.horizontal(|ui| {
-                    ui.set_min_height(22.0);
-                    ui.add_sized(
-                        [118.0, 20.0],
-                        egui::Label::new(
-                            egui::RichText::new(&entry.combo)
-                                .monospace()
-                                .color(palette.text),
-                        ),
+                    ui.set_min_height(SHORTCUT_ROW_HEIGHT);
+                    let (combo_rect, _) = ui.allocate_exact_size(
+                        egui::vec2(SHORTCUT_COMBO_WIDTH, SHORTCUT_ROW_HEIGHT),
+                        egui::Sense::hover(),
                     );
-                    ui.label(
-                        egui::RichText::new(&entry.action)
-                            .size(13.0)
-                            .color(palette.text),
+                    show_keycap_combo(ui, combo_rect, &entry.combo, palette);
+                    ui.add_space(SHORTCUT_ACTION_GAP);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), SHORTCUT_ROW_HEIGHT),
+                        shortcut_action_layout(),
+                        |ui| {
+                            ui.label(
+                                egui::RichText::new(&entry.action)
+                                    .size(12.0)
+                                    .color(palette.text),
+                            );
+                        },
                     );
                 });
             }
         }
     });
+}
+
+fn combo_keycap_parts(combo: &str) -> Vec<&str> {
+    combo
+        .split('+')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect()
 }
 
 fn grouped_shortcuts(shortcuts: &[ShortcutEntry]) -> Vec<(String, Vec<&ShortcutEntry>)> {
@@ -945,7 +1210,7 @@ fn install_korean_font(ctx: &egui::Context) -> Result<()> {
 
 fn group_heading_font_id() -> egui::FontId {
     egui::FontId::new(
-        16.0,
+        13.0,
         egui::FontFamily::Name(Arc::from(KOREAN_BOLD_FONT_FAMILY)),
     )
 }
@@ -961,7 +1226,6 @@ struct UiPalette {
     button_hover: egui::Color32,
     button_active: egui::Color32,
     heading: egui::Color32,
-    group_heading: egui::Color32,
 }
 
 fn palette_for(theme: egui::Theme) -> UiPalette {
@@ -976,7 +1240,6 @@ fn palette_for(theme: egui::Theme) -> UiPalette {
             button_hover: egui::Color32::from_rgb(61, 68, 78),
             button_active: egui::Color32::from_rgb(80, 91, 106),
             heading: egui::Color32::from_rgb(248, 249, 250),
-            group_heading: egui::Color32::from_rgb(255, 255, 255),
         },
         egui::Theme::Light => UiPalette {
             background: egui::Color32::from_rgb(247, 248, 250),
@@ -988,7 +1251,6 @@ fn palette_for(theme: egui::Theme) -> UiPalette {
             button_hover: egui::Color32::from_rgb(204, 215, 228),
             button_active: egui::Color32::from_rgb(184, 200, 220),
             heading: egui::Color32::from_rgb(11, 17, 25),
-            group_heading: egui::Color32::from_rgb(0, 0, 0),
         },
     }
 }
@@ -1061,6 +1323,13 @@ fn apply_palette_to_visuals(visuals: &mut egui::Visuals, palette: UiPalette) {
     visuals.widgets.open.bg_stroke = no_stroke;
 }
 
+fn apply_view_visuals(visuals: &mut egui::Visuals, view: AppView) {
+    if matches!(view, AppView::Shortcuts) {
+        visuals.panel_fill = egui::Color32::TRANSPARENT;
+        visuals.window_fill = egui::Color32::TRANSPARENT;
+    }
+}
+
 impl eframe::App for CheatSheetsApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.remember_repaint_context(ctx);
@@ -1089,18 +1358,22 @@ impl eframe::App for CheatSheetsApp {
         {
             let visuals = ui.visuals_mut();
             apply_palette_to_visuals(visuals, palette);
+            apply_view_visuals(visuals, self.view);
         }
 
-        let background = with_opacity(palette.background, self.settings.opacity);
-        ui.painter().rect_filled(ui.max_rect(), 0.0, background);
+        apply_viewport_chrome(&ctx, self.view);
+        if paints_full_window_background(self.view) {
+            let background = with_opacity(palette.background, self.settings.opacity);
+            ui.painter().rect_filled(ui.max_rect(), 0.0, background);
+        }
         ui.scope_builder(
             egui::UiBuilder::new()
-                .max_rect(ui.max_rect().shrink(28.0))
+                .max_rect(ui.max_rect().shrink(view_content_inset(self.view)))
                 .layout(egui::Layout::top_down(egui::Align::Min)),
             |ui| {
                 ui.set_min_size(ui.available_size());
                 match self.view {
-                    AppView::Shortcuts => self.show_shortcuts(ui, palette),
+                    AppView::Shortcuts => self.show_shortcuts(ui),
                     AppView::Settings => self.show_settings(ui, &ctx, palette),
                 }
             },
@@ -1109,6 +1382,10 @@ impl eframe::App for CheatSheetsApp {
 
     fn on_exit(&mut self) {
         let _ = storage::save_app_settings(&self.settings);
+    }
+
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        transparent_clear_color()
     }
 }
 
@@ -1157,19 +1434,127 @@ mod tests {
     }
 
     #[test]
-    fn group_heading_palette_is_stronger_than_regular_heading() {
-        let dark = palette_for(egui::Theme::Dark);
-        let light = palette_for(egui::Theme::Light);
+    fn combo_parts_trim_empty_segments() {
+        assert_eq!(
+            combo_keycap_parts(" Ctrl + Shift + P "),
+            vec!["Ctrl", "Shift", "P"]
+        );
+    }
 
-        assert!(dark.group_heading.r() >= dark.heading.r());
-        assert!(light.group_heading.r() <= light.heading.r());
+    #[test]
+    fn shortcut_card_palette_applies_overlay_opacity() {
+        let low = shortcut_card_palette(0.55);
+        let high = shortcut_card_palette(1.0);
+
+        assert!(low.fill.a() < high.fill.a());
+    }
+
+    #[test]
+    fn long_keycap_combos_keep_right_edge_aligned() {
+        let parts = combo_keycap_parts("Ctrl+Shift+Space");
+        let start = keycap_combo_start_x(0.0, SHORTCUT_COMBO_WIDTH, &parts);
+
+        assert!((start + combo_keycap_width(&parts) - SHORTCUT_COMBO_WIDTH).abs() < 0.01);
+    }
+
+    #[test]
+    fn keycap_badge_has_enough_vertical_padding() {
+        assert_eq!(KEYCAP_HEIGHT, 16.0);
+    }
+
+    #[test]
+    fn keycap_text_is_optically_centered_upward() {
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(32.0, 16.0));
+
+        assert!(keycap_text_position(rect).y < rect.center().y);
+    }
+
+    #[test]
+    fn resize_grip_sits_in_bottom_right_corner() {
+        let card = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(100.0, 80.0));
+        let grip = resize_grip_rect(card);
+
+        assert_eq!(grip.right(), card.right() - RESIZE_GRIP_INSET);
+        assert_eq!(grip.bottom(), card.bottom() - RESIZE_GRIP_INSET);
+        assert_eq!(grip.width(), RESIZE_GRIP_SIZE);
+        assert_eq!(grip.height(), RESIZE_GRIP_SIZE);
+    }
+
+    #[test]
+    fn resize_delta_clamps_to_minimum_window_size() {
+        let resized = resized_overlay_size(egui::vec2(930.0, 570.0), egui::vec2(-100.0, -100.0));
+
+        assert_eq!(resized.x, WindowPlacement::MIN_WIDTH);
+        assert_eq!(resized.y, WindowPlacement::MIN_HEIGHT);
+    }
+
+    #[test]
+    fn shortcut_card_senses_drag_for_window_movement() {
+        let sense = shortcut_card_drag_sense();
+
+        assert!(sense.senses_drag());
+    }
+
+    #[test]
+    fn shortcut_action_layout_is_left_aligned() {
+        let layout = shortcut_action_layout();
+
+        assert_eq!(layout.main_dir, egui::Direction::LeftToRight);
+        assert_eq!(layout.main_align, egui::Align::LEFT);
+    }
+
+    #[test]
+    fn shortcuts_view_does_not_paint_full_window_background() {
+        assert!(!paints_full_window_background(AppView::Shortcuts));
+        assert!(paints_full_window_background(AppView::Settings));
+    }
+
+    #[test]
+    fn shortcuts_view_has_no_transparent_outer_border() {
+        assert_eq!(view_content_inset(AppView::Shortcuts), 0.0);
+        assert_eq!(shortcut_card_outer_inset(AppView::Shortcuts), 0.0);
+    }
+
+    #[test]
+    fn shortcuts_view_uses_overlay_chrome_but_settings_uses_window_chrome() {
+        assert_eq!(viewport_decorations_for_view(AppView::Shortcuts), false);
+        assert_eq!(viewport_resizable_for_view(AppView::Shortcuts), false);
+        assert_eq!(viewport_decorations_for_view(AppView::Settings), true);
+        assert_eq!(viewport_resizable_for_view(AppView::Settings), true);
+    }
+
+    #[test]
+    fn overlay_clear_color_is_transparent() {
+        assert_eq!(transparent_clear_color()[3], 0.0);
+    }
+
+    #[test]
+    fn shortcut_overlay_visual_fills_are_transparent() {
+        let mut visuals = egui::Theme::Dark.default_visuals();
+        apply_palette_to_visuals(&mut visuals, palette_for(egui::Theme::Dark));
+
+        apply_view_visuals(&mut visuals, AppView::Shortcuts);
+
+        assert_eq!(visuals.panel_fill.a(), 0);
+        assert_eq!(visuals.window_fill.a(), 0);
+    }
+
+    #[test]
+    fn settings_visual_fills_stay_opaque() {
+        let mut visuals = egui::Theme::Dark.default_visuals();
+        apply_palette_to_visuals(&mut visuals, palette_for(egui::Theme::Dark));
+
+        apply_view_visuals(&mut visuals, AppView::Settings);
+
+        assert!(visuals.panel_fill.a() > 0);
+        assert!(visuals.window_fill.a() > 0);
     }
 
     #[test]
     fn group_heading_uses_bold_korean_font_family() {
         let font_id = group_heading_font_id();
 
-        assert_eq!(font_id.size, 16.0);
+        assert_eq!(font_id.size, 13.0);
         assert_eq!(
             font_id.family,
             egui::FontFamily::Name(std::sync::Arc::from(KOREAN_BOLD_FONT_FAMILY))
