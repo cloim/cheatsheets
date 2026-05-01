@@ -1,5 +1,5 @@
 use crate::core::{
-    ShortcutEntry, ShortcutSource, UserCatalog, UserShortcutPatch, normalize_app_id,
+    AppSheetConfig, ShortcutEntry, ShortcutSource, UserCatalog, UserShortcutPatch, normalize_app_id,
 };
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -149,6 +149,33 @@ struct StoredUserCatalog {
     apps: BTreeMap<String, Vec<StoredShortcutEntry>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppSheet {
+    pub config: AppSheetConfig,
+    pub patches: Vec<UserShortcutPatch>,
+}
+
+impl Default for AppSheet {
+    fn default() -> Self {
+        Self {
+            config: AppSheetConfig::default(),
+            patches: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredAppSheet {
+    #[serde(default)]
+    process_name: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    group_order: Vec<String>,
+    #[serde(default)]
+    shortcuts: Vec<StoredShortcutEntry>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredShortcutEntry {
     combo: String,
@@ -211,18 +238,28 @@ pub fn load_app_user_catalog_from_customs_index(
     app_id: &str,
 ) -> Result<UserCatalog> {
     let app_id = normalize_app_id(app_id);
-    let Some(path) = index.path_for(&app_id) else {
+    let sheet = load_app_sheet_from_customs_index(index, &app_id)?;
+    if sheet.patches.is_empty() {
         return Ok(UserCatalog::default());
+    }
+
+    let mut apps = BTreeMap::new();
+    apps.insert(app_id, sheet.patches);
+    Ok(UserCatalog { apps })
+}
+
+pub fn load_app_sheet_from_customs_index(
+    index: &UserCatalogIndex,
+    app_id: &str,
+) -> Result<AppSheet> {
+    let app_id = normalize_app_id(app_id);
+    let Some(path) = index.path_for(&app_id) else {
+        return Ok(AppSheet::default());
     };
 
     let content =
         fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
-    let patches = parse_app_shortcuts_json(&content)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
-
-    let mut apps = BTreeMap::new();
-    apps.insert(app_id, patches);
-    Ok(UserCatalog { apps })
+    parse_app_sheet_json(&content).with_context(|| format!("failed to parse {}", path.display()))
 }
 
 pub fn save_user_catalog_to_customs_dir(catalog: &UserCatalog, dir: &Path) -> Result<()> {
@@ -234,23 +271,72 @@ pub fn save_user_catalog_to_customs_dir(catalog: &UserCatalog, dir: &Path) -> Re
         }
 
         let path = dir.join(format!("{app_id}.json"));
-        let content = serialize_app_shortcuts_json(patches)?;
+        let config = fs::read_to_string(&path)
+            .ok()
+            .and_then(|content| parse_app_sheet_json(&content).ok())
+            .map(|sheet| sheet.config)
+            .unwrap_or_default();
+        let content = serialize_app_sheet_json(&AppSheet {
+            config,
+            patches: patches.clone(),
+        })?;
         fs::write(&path, content).with_context(|| format!("failed to write {}", path.display()))?;
     }
     Ok(())
 }
 
 pub fn parse_app_shortcuts_json(content: &str) -> Result<Vec<UserShortcutPatch>> {
-    let entries: Vec<StoredShortcutEntry> =
-        serde_json::from_str(content).context("failed to parse shortcut array")?;
-    entries
+    Ok(parse_app_sheet_json(content)?.patches)
+}
+
+pub fn parse_app_sheet_json(content: &str) -> Result<AppSheet> {
+    let value: serde_json::Value =
+        serde_json::from_str(content).context("failed to parse app sheet")?;
+    let (config, entries) = match value {
+        serde_json::Value::Array(_) => {
+            let entries: Vec<StoredShortcutEntry> =
+                serde_json::from_value(value).context("failed to parse shortcut array")?;
+            (AppSheetConfig::default(), entries)
+        }
+        serde_json::Value::Object(ref object)
+            if object.contains_key("shortcuts")
+                || object.contains_key("process_name")
+                || object.contains_key("group_order") =>
+        {
+            let sheet: StoredAppSheet =
+                serde_json::from_value(value).context("failed to parse app sheet object")?;
+            (
+                AppSheetConfig {
+                    process_name: normalized_process_name(sheet.process_name),
+                    description: normalized_optional_text(sheet.description),
+                    group_order: sheet
+                        .group_order
+                        .iter()
+                        .map(|group| normalized_group(group))
+                        .collect(),
+                },
+                sheet.shortcuts,
+            )
+        }
+        _ => return Err(anyhow!("not an app sheet")),
+    };
+    let patches = entries
         .into_iter()
         .map(|entry| stored_entry_to_shortcut(entry, "custom file").map(UserShortcutPatch::replace))
-        .collect()
+        .collect::<Result<Vec<_>>>()?;
+    Ok(AppSheet { config, patches })
 }
 
 pub fn serialize_app_shortcuts_json(patches: &[UserShortcutPatch]) -> Result<String> {
-    let entries = patches
+    serialize_app_sheet_json(&AppSheet {
+        config: AppSheetConfig::default(),
+        patches: patches.to_owned(),
+    })
+}
+
+pub fn serialize_app_sheet_json(sheet: &AppSheet) -> Result<String> {
+    let entries = sheet
+        .patches
         .iter()
         .filter_map(|patch| match patch {
             UserShortcutPatch::Replace { entry } => Some(StoredShortcutEntry {
@@ -262,7 +348,18 @@ pub fn serialize_app_shortcuts_json(patches: &[UserShortcutPatch]) -> Result<Str
         })
         .collect::<Vec<_>>();
 
-    serde_json::to_string_pretty(&entries).context("failed to serialize shortcut array")
+    if sheet.config == AppSheetConfig::default() {
+        return serde_json::to_string_pretty(&entries)
+            .context("failed to serialize shortcut array");
+    }
+
+    let stored = StoredAppSheet {
+        process_name: sheet.config.process_name.clone(),
+        description: sheet.config.description.clone(),
+        group_order: sheet.config.group_order.clone(),
+        shortcuts: entries,
+    };
+    serde_json::to_string_pretty(&stored).context("failed to serialize app sheet")
 }
 
 pub fn serialize_user_catalog_json(catalog: &UserCatalog) -> Result<String> {
@@ -373,6 +470,16 @@ fn normalized_group(group: &str) -> String {
     } else {
         group.to_owned()
     }
+}
+
+fn normalized_process_name(process_name: Option<String>) -> Option<String> {
+    normalized_optional_text(process_name)
+}
+
+fn normalized_optional_text(value: Option<String>) -> Option<String> {
+    value
+        .map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty())
 }
 
 pub fn load_app_settings() -> Result<AppSettings> {

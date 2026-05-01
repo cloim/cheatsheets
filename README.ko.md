@@ -64,7 +64,7 @@ Customs\code.json
 Customs\chrome.json
 ```
 
-각 파일은 단축키 배열 JSON입니다.
+각 파일은 앱시트입니다. 짧은 형식은 단축키 배열 JSON입니다.
 
 ```json
 [
@@ -77,6 +77,25 @@ Customs\chrome.json
 ```
 
 `group`이 비어 있으면 `Custom` 그룹으로 처리됩니다.
+
+오버레이 메타데이터가 필요하면 앱시트를 객체 형식으로 작성할 수도 있습니다.
+
+```json
+{
+  "process_name": "프로세스 표시 명",
+  "description": "오버레이 서브 타이틀",
+  "group_order": ["Navigation", "Search"],
+  "shortcuts": [
+    {
+      "combo": "Ctrl+P",
+      "action": "Open file by name",
+      "group": "Navigation"
+    }
+  ]
+}
+```
+
+`process_name`은 오버레이 타이틀에 표시됩니다. `description`은 타이틀 아래 서브 타이틀로 표시됩니다. `group_order`는 배열 요소 순서대로 그룹 표시 순서를 정합니다. 앱시트에 존재하지만 `group_order`에 없는 그룹은 순서가 지정된 그룹 뒤에 등록된 순서로 표시됩니다. 각 그룹 안의 콤보도 등록된 순서를 유지합니다.
 
 ## 가져오기 형식
 

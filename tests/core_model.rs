@@ -1,4 +1,6 @@
-use cheatsheets::core::{AppIdentity, Catalog, ShortcutEntry, ShortcutSource, UserShortcutPatch};
+use cheatsheets::core::{
+    AppIdentity, AppSheetConfig, Catalog, ShortcutEntry, ShortcutSource, UserShortcutPatch,
+};
 
 #[test]
 fn app_identity_uses_lowercase_executable_stem_as_app_id() {
@@ -105,4 +107,72 @@ fn user_shortcut_reload_replaces_previous_app_patches() {
         .collect();
 
     assert_eq!(combos, vec!["Ctrl+R"]);
+}
+
+#[test]
+fn app_sheet_config_controls_title_group_order_and_registration_order() {
+    let mut catalog = Catalog::default();
+    catalog.add_user_patch(
+        "code",
+        UserShortcutPatch::replace(ShortcutEntry::new(
+            "Ctrl+Z",
+            "Undo",
+            "Edit",
+            ShortcutSource::User,
+        )),
+    );
+    catalog.add_user_patch(
+        "code",
+        UserShortcutPatch::replace(ShortcutEntry::new(
+            "Ctrl+P",
+            "Open file",
+            "Navigation",
+            ShortcutSource::User,
+        )),
+    );
+    catalog.add_user_patch(
+        "code",
+        UserShortcutPatch::replace(ShortcutEntry::new(
+            "Ctrl+A",
+            "Select all",
+            "Edit",
+            ShortcutSource::User,
+        )),
+    );
+    catalog.add_user_patch(
+        "code",
+        UserShortcutPatch::replace(ShortcutEntry::new(
+            "Ctrl+R",
+            "Reload",
+            "Window",
+            ShortcutSource::User,
+        )),
+    );
+
+    let sheet = catalog.sheet_for_with_config(
+        "code",
+        &AppSheetConfig {
+            process_name: Some("프로세스 표시 명".to_owned()),
+            description: Some("오버레이 서브 타이틀".to_owned()),
+            group_order: vec!["Navigation".to_owned()],
+        },
+    );
+
+    let rendered: Vec<_> = sheet
+        .shortcuts
+        .iter()
+        .map(|entry| (entry.group.as_str(), entry.combo.as_str()))
+        .collect();
+
+    assert_eq!(sheet.display_name, "프로세스 표시 명");
+    assert_eq!(sheet.description.as_deref(), Some("오버레이 서브 타이틀"));
+    assert_eq!(
+        rendered,
+        vec![
+            ("Navigation", "Ctrl+P"),
+            ("Edit", "Ctrl+Z"),
+            ("Edit", "Ctrl+A"),
+            ("Window", "Ctrl+R")
+        ]
+    );
 }

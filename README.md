@@ -64,7 +64,7 @@ Customs\code.json
 Customs\chrome.json
 ```
 
-Each file is a JSON array of shortcuts.
+Each file is an app sheet. The short form is a JSON array of shortcuts.
 
 ```json
 [
@@ -77,6 +77,25 @@ Each file is a JSON array of shortcuts.
 ```
 
 If `group` is empty, CheatSheets uses the `Custom` group.
+
+An app sheet can also use object form when it needs overlay metadata.
+
+```json
+{
+  "process_name": "Process display name",
+  "description": "Overlay subtitle",
+  "group_order": ["Navigation", "Search"],
+  "shortcuts": [
+    {
+      "combo": "Ctrl+P",
+      "action": "Open file by name",
+      "group": "Navigation"
+    }
+  ]
+}
+```
+
+`process_name` is shown as the overlay title. `description` is shown as a subtitle below the title. `group_order` fixes group display order by array order. Groups not listed in `group_order` appear after ordered groups in their registration order. Combos inside each group also keep registration order.
 
 ## Import Formats
 

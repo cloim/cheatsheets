@@ -1,5 +1,6 @@
 use crate::core::{
-    AppIdentity, Catalog, ShortcutEntry, ShortcutSource, UserShortcutPatch, normalize_app_id,
+    AppIdentity, AppSheetConfig, Catalog, ShortcutEntry, ShortcutSource, UserShortcutPatch,
+    normalize_app_id,
 };
 use crate::import::{ImportFormat, parse_shortcut_import};
 use crate::storage::{AppSettings, ThemeMode, WindowPlacement};
@@ -9,7 +10,8 @@ use eframe::egui;
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState, hotkey::HotKey};
 use std::{
     collections::BTreeMap,
-    fs,
+    env, fs,
+    process::Command,
     sync::{Arc, Mutex, mpsc},
 };
 use tray_icon::{
@@ -19,6 +21,7 @@ use tray_icon::{
 
 const APP_NAME: &str = "CheatSheets";
 const TRAY_MENU_SETTINGS: &str = "cheatsheets.settings";
+const TRAY_MENU_RESTART: &str = "cheatsheets.restart";
 const TRAY_MENU_CLOSE: &str = "cheatsheets.close";
 const KOREAN_FONT_REGULAR: &str = "malgun_gothic";
 const KOREAN_FONT_BOLD: &str = "malgun_gothic_bold";
@@ -36,6 +39,7 @@ pub struct CheatSheetsApp {
     tray_icon: Option<TrayIcon>,
     tray_rx: mpsc::Receiver<TrayMenuAction>,
     custom_index: storage::UserCatalogIndex,
+    active_app_sheet_config: AppSheetConfig,
     settings: AppSettings,
     view: AppView,
     capture_target: Option<CaptureTarget>,
@@ -62,6 +66,7 @@ enum CaptureTarget {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TrayMenuAction {
     Settings,
+    Restart,
     Close,
 }
 
@@ -104,6 +109,7 @@ impl CheatSheetsApp {
             tray_icon: None,
             tray_rx,
             custom_index,
+            active_app_sheet_config: AppSheetConfig::default(),
             settings,
             view: AppView::Shortcuts,
             capture_target: None,
@@ -172,11 +178,7 @@ impl CheatSheetsApp {
             Ok(tray_icon) => {
                 let repaint_ctx = Arc::clone(&self.repaint_ctx);
                 MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
-                    let action = match event.id.as_ref() {
-                        TRAY_MENU_SETTINGS => Some(TrayMenuAction::Settings),
-                        TRAY_MENU_CLOSE => Some(TrayMenuAction::Close),
-                        _ => None,
-                    };
+                    let action = tray_action_for_menu_id(event.id.as_ref());
                     if let Some(action) = action {
                         let _ = sender.send(action);
                         if let Ok(guard) = repaint_ctx.lock()
@@ -228,6 +230,18 @@ impl CheatSheetsApp {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                     ctx.request_repaint();
                 }
+                TrayMenuAction::Restart => match restart_application() {
+                    Ok(()) => {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    Err(error) => {
+                        append_status(&mut self.status, format!("재시작 실패: {error:#}"));
+                        self.visible = true;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                        ctx.request_repaint();
+                    }
+                },
                 TrayMenuAction::Close => {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
@@ -508,14 +522,20 @@ impl CheatSheetsApp {
 
     fn ensure_user_shortcuts_loaded(&mut self, app_id: &str) -> Result<()> {
         let app_id = normalize_app_id(app_id);
+        let is_active_app = app_id == normalize_app_id(&self.active.app_id);
         if !self.custom_index.has_app(&app_id) {
             self.catalog.replace_user_patches(app_id, Vec::new());
+            if is_active_app {
+                self.active_app_sheet_config = AppSheetConfig::default();
+            }
             return Ok(());
         }
 
-        let mut user_catalog =
-            storage::load_app_user_catalog_from_customs_index(&self.custom_index, &app_id)?;
-        let patches = user_catalog.apps.remove(&app_id).unwrap_or_default();
+        let sheet = storage::load_app_sheet_from_customs_index(&self.custom_index, &app_id)?;
+        let patches = sheet.patches;
+        if is_active_app {
+            self.active_app_sheet_config = sheet.config;
+        }
         self.catalog.replace_user_patches(&app_id, patches);
         Ok(())
     }
@@ -536,14 +556,24 @@ impl CheatSheetsApp {
     fn show_shortcuts(&mut self, ui: &mut egui::Ui, palette: UiPalette) {
         let active_app_id = normalize_app_id(&self.active.app_id);
         self.load_user_shortcuts_for_overlay();
-        let sheet = self.catalog.sheet_for(&active_app_id);
+        let sheet = self
+            .catalog
+            .sheet_for_with_config(&active_app_id, &self.active_app_sheet_config);
         ui.add_space(4.0);
         ui.label(
-            egui::RichText::new(active_app_id)
+            egui::RichText::new(&sheet.display_name)
                 .size(26.0)
                 .strong()
                 .color(palette.heading),
         );
+        if let Some(description) = sheet.description.as_deref() {
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(description)
+                    .size(13.0)
+                    .color(palette.weak_text),
+            );
+        }
         ui.add_space(22.0);
 
         if sheet.shortcuts.is_empty() {
@@ -805,14 +835,18 @@ fn show_shortcut_columns(ui: &mut egui::Ui, shortcuts: &[ShortcutEntry], palette
 }
 
 fn grouped_shortcuts(shortcuts: &[ShortcutEntry]) -> Vec<(String, Vec<&ShortcutEntry>)> {
-    let mut grouped: BTreeMap<String, Vec<&ShortcutEntry>> = BTreeMap::new();
+    let mut grouped: Vec<(String, Vec<&ShortcutEntry>)> = Vec::new();
+    let mut indexes: BTreeMap<String, usize> = BTreeMap::new();
     for entry in shortcuts {
-        grouped
-            .entry(entry.group.trim().to_owned())
-            .or_default()
-            .push(entry);
+        let group = entry.group.trim().to_owned();
+        if let Some(index) = indexes.get(&group) {
+            grouped[*index].1.push(entry);
+        } else {
+            indexes.insert(group.clone(), grouped.len());
+            grouped.push((group, vec![entry]));
+        }
     }
-    grouped.into_iter().collect()
+    grouped
 }
 
 fn append_status(status: &mut String, message: String) {
@@ -826,8 +860,9 @@ fn append_status(status: &mut String, message: String) {
 
 fn build_tray_icon() -> Result<TrayIcon> {
     let settings_item = MenuItem::with_id(TRAY_MENU_SETTINGS, "설정", true, None);
+    let restart_item = MenuItem::with_id(TRAY_MENU_RESTART, "재시작", true, None);
     let close_item = MenuItem::with_id(TRAY_MENU_CLOSE, "닫기", true, None);
-    let menu = Menu::with_items(&[&settings_item, &close_item])?;
+    let menu = Menu::with_items(&[&settings_item, &restart_item, &close_item])?;
     let icon = make_tray_icon()?;
 
     TrayIconBuilder::new()
@@ -838,6 +873,23 @@ fn build_tray_icon() -> Result<TrayIcon> {
         .with_menu_on_right_click(true)
         .build()
         .context("failed to build tray icon")
+}
+
+fn tray_action_for_menu_id(menu_id: &str) -> Option<TrayMenuAction> {
+    match menu_id {
+        TRAY_MENU_SETTINGS => Some(TrayMenuAction::Settings),
+        TRAY_MENU_RESTART => Some(TrayMenuAction::Restart),
+        TRAY_MENU_CLOSE => Some(TrayMenuAction::Close),
+        _ => None,
+    }
+}
+
+fn restart_application() -> Result<()> {
+    let exe = env::current_exe().context("현재 실행 파일 경로를 확인하지 못했습니다")?;
+    Command::new(&exe)
+        .spawn()
+        .with_context(|| format!("새 프로세스를 시작하지 못했습니다: {}", exe.display()))?;
+    Ok(())
 }
 
 fn make_tray_icon() -> Result<Icon> {
@@ -1121,6 +1173,14 @@ mod tests {
         assert_eq!(
             font_id.family,
             egui::FontFamily::Name(std::sync::Arc::from(KOREAN_BOLD_FONT_FAMILY))
+        );
+    }
+
+    #[test]
+    fn tray_menu_restart_id_maps_to_restart_action() {
+        assert_eq!(
+            tray_action_for_menu_id(TRAY_MENU_RESTART),
+            Some(TrayMenuAction::Restart)
         );
     }
 }

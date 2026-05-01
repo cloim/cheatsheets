@@ -1,8 +1,9 @@
 use cheatsheets::core::{ShortcutEntry, ShortcutSource, UserCatalog, UserShortcutPatch};
 use cheatsheets::storage::{
-    app_settings_path, load_app_user_catalog_from_customs_index,
+    app_settings_path, load_app_sheet_from_customs_index, load_app_user_catalog_from_customs_index,
     load_user_catalog_from_customs_dir, load_user_catalog_index_from_customs_dir,
-    save_user_catalog_to_customs_dir, serialize_app_shortcuts_json, user_customs_dir,
+    parse_app_sheet_json, save_user_catalog_to_customs_dir, serialize_app_shortcuts_json,
+    user_customs_dir,
 };
 use std::collections::BTreeMap;
 
@@ -106,6 +107,65 @@ fn loads_only_requested_app_from_customs_index() {
 
     assert!(catalog.apps.contains_key("code"));
     assert!(!catalog.apps.contains_key("broken"));
+}
+
+#[test]
+fn parses_app_sheet_object_with_process_name_group_order_and_shortcuts() {
+    let sheet = parse_app_sheet_json(
+        r#"{
+  "process_name": "프로세스 표시 명",
+  "description": "오버레이 서브 타이틀",
+  "group_order": ["Navigation", "Window"],
+  "shortcuts": [
+    {"combo":"ctrl+p","action":"Open file","group":"Navigation"},
+    {"combo":"ctrl+r","action":"Reload window","group":"Window"}
+  ]
+}"#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        sheet.config.process_name.as_deref(),
+        Some("프로세스 표시 명")
+    );
+    assert_eq!(
+        sheet.config.description.as_deref(),
+        Some("오버레이 서브 타이틀")
+    );
+    assert_eq!(sheet.config.group_order, vec!["Navigation", "Window"]);
+    assert_eq!(sheet.patches.len(), 2);
+    let UserShortcutPatch::Replace { entry } = &sheet.patches[0] else {
+        panic!("expected replace patch");
+    };
+    assert_eq!(entry.combo, "Ctrl+P");
+}
+
+#[test]
+fn loads_app_sheet_metadata_from_customs_index() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        temp.path().join("Code.json"),
+        r#"{
+  "process_name": "VS Code",
+  "description": "Code editor shortcuts",
+  "group_order": ["Search"],
+  "shortcuts": [
+    {"combo":"ctrl+f","action":"Find","group":"Search"}
+  ]
+}"#,
+    )
+    .unwrap();
+
+    let index = load_user_catalog_index_from_customs_dir(temp.path()).unwrap();
+    let sheet = load_app_sheet_from_customs_index(&index, "code").unwrap();
+
+    assert_eq!(sheet.config.process_name.as_deref(), Some("VS Code"));
+    assert_eq!(
+        sheet.config.description.as_deref(),
+        Some("Code editor shortcuts")
+    );
+    assert_eq!(sheet.config.group_order, vec!["Search"]);
+    assert_eq!(sheet.patches.len(), 1);
 }
 
 #[test]

@@ -97,6 +97,13 @@ pub struct Catalog {
     pub user: BTreeMap<String, Vec<UserShortcutPatch>>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AppSheetConfig {
+    pub process_name: Option<String>,
+    pub description: Option<String>,
+    pub group_order: Vec<String>,
+}
+
 impl Catalog {
     pub fn with_builtins() -> Self {
         let mut catalog = Self::default();
@@ -119,12 +126,37 @@ impl Catalog {
     }
 
     pub fn sheet_for(&self, app_id: &str) -> ShortcutSheet {
+        self.sheet_for_with_config(app_id, &AppSheetConfig::default())
+    }
+
+    pub fn sheet_for_with_config(&self, app_id: &str, config: &AppSheetConfig) -> ShortcutSheet {
         let app_id = normalize_app_id(app_id);
+        let display_name = config
+            .process_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .unwrap_or(&app_id)
+            .to_owned();
+        let description = config
+            .description
+            .as_deref()
+            .map(str::trim)
+            .filter(|description| !description.is_empty())
+            .map(str::to_owned);
         let mut disabled = BTreeSet::new();
-        let mut entries: BTreeMap<String, ShortcutEntry> = BTreeMap::new();
+        let mut entries: BTreeMap<String, OrderedShortcutEntry> = BTreeMap::new();
+        let mut next_position = 0;
 
         for entry in self.builtin.get(&app_id).into_iter().flatten() {
-            entries.insert(entry.key(), entry.clone());
+            entries.insert(
+                entry.key(),
+                OrderedShortcutEntry {
+                    entry: entry.clone(),
+                    position: next_position,
+                },
+            );
+            next_position += 1;
         }
 
         for patch in self.user.get(&app_id).into_iter().flatten() {
@@ -132,7 +164,14 @@ impl Catalog {
                 UserShortcutPatch::Replace { entry } => {
                     let key = entry.key();
                     disabled.remove(&key);
-                    entries.insert(key, entry.clone());
+                    entries.insert(
+                        key,
+                        OrderedShortcutEntry {
+                            entry: entry.clone(),
+                            position: next_position,
+                        },
+                    );
+                    next_position += 1;
                 }
                 UserShortcutPatch::Disable { combo } => {
                     let key = normalize_combo_key(combo);
@@ -146,9 +185,25 @@ impl Catalog {
             .into_iter()
             .filter_map(|(key, entry)| (!disabled.contains(&key)).then_some(entry))
             .collect();
-        shortcuts.sort_by(|a, b| a.group.cmp(&b.group).then(a.combo.cmp(&b.combo)));
+        let group_order = group_order_positions(&config.group_order);
+        let group_positions = group_first_positions(&shortcuts);
+        shortcuts.sort_by(|a, b| {
+            group_sort_key(&a.entry.group, &group_order, &group_positions)
+                .cmp(&group_sort_key(
+                    &b.entry.group,
+                    &group_order,
+                    &group_positions,
+                ))
+                .then(a.position.cmp(&b.position))
+        });
+        let shortcuts = shortcuts.into_iter().map(|entry| entry.entry).collect();
 
-        ShortcutSheet { app_id, shortcuts }
+        ShortcutSheet {
+            app_id,
+            display_name,
+            description,
+            shortcuts,
+        }
     }
 
     pub fn merge_user_catalog(&mut self, user_catalog: UserCatalog) {
@@ -231,7 +286,59 @@ pub struct UserCatalog {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShortcutSheet {
     pub app_id: String,
+    pub display_name: String,
+    pub description: Option<String>,
     pub shortcuts: Vec<ShortcutEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OrderedShortcutEntry {
+    entry: ShortcutEntry,
+    position: usize,
+}
+
+fn group_order_positions(group_order: &[String]) -> BTreeMap<String, usize> {
+    group_order
+        .iter()
+        .map(|group| normalized_group_name(group))
+        .filter(|group| !group.is_empty())
+        .enumerate()
+        .map(|(index, group)| (group, index))
+        .collect()
+}
+
+fn group_first_positions(entries: &[OrderedShortcutEntry]) -> BTreeMap<String, usize> {
+    let mut positions = BTreeMap::new();
+    for entry in entries {
+        positions
+            .entry(normalized_group_name(&entry.entry.group))
+            .or_insert(entry.position);
+    }
+    positions
+}
+
+fn group_sort_key(
+    group: &str,
+    group_order: &BTreeMap<String, usize>,
+    group_positions: &BTreeMap<String, usize>,
+) -> (usize, usize) {
+    let group = normalized_group_name(group);
+    match group_order.get(&group) {
+        Some(order) => (0, *order),
+        None => (
+            1,
+            group_positions.get(&group).copied().unwrap_or(usize::MAX),
+        ),
+    }
+}
+
+fn normalized_group_name(group: &str) -> String {
+    let group = group.trim();
+    if group.is_empty() {
+        "Custom".to_owned()
+    } else {
+        group.to_owned()
+    }
 }
 
 pub fn normalize_app_id(app_id: impl AsRef<str>) -> String {
