@@ -47,6 +47,47 @@ pub struct AppSettings {
     pub opacity: f32,
     pub toggle_hotkey: String,
     pub window: Option<WindowPlacement>,
+    pub overlay_style: OverlayStyleSettings,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RgbaColor {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OverlayStyleSettings {
+    pub title_size: f32,
+    pub subtitle_size: f32,
+    pub group_heading_size: f32,
+    pub action_text_size: f32,
+    pub action_text_y_offset: f32,
+    pub keycap_text_size: f32,
+    pub card_background: RgbaColor,
+    pub card_border: RgbaColor,
+    pub title_color: RgbaColor,
+    pub group_heading_color: RgbaColor,
+    pub action_text_color: RgbaColor,
+    pub weak_text_color: RgbaColor,
+    pub divider_color: RgbaColor,
+    pub keycap_background: RgbaColor,
+    pub keycap_border: RgbaColor,
+    pub keycap_text_color: RgbaColor,
+    pub card_padding: f32,
+    pub row_height: f32,
+    pub combo_width: f32,
+    pub action_gap: f32,
+    pub keycap_height: f32,
+    pub keycap_gap: f32,
+    pub card_radius: f32,
+    pub show_column_dividers: bool,
+    pub show_resize_grip: bool,
+    pub show_empty_message: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -64,6 +105,57 @@ impl Default for AppSettings {
             opacity: 0.96,
             toggle_hotkey: "Ctrl+Shift+Space".to_owned(),
             window: None,
+            overlay_style: OverlayStyleSettings::default(),
+        }
+    }
+}
+
+impl Default for RgbaColor {
+    fn default() -> Self {
+        Self {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 255,
+        }
+    }
+}
+
+impl RgbaColor {
+    pub const fn rgba(r: u8, g: u8, b: u8, a: u8) -> Self {
+        Self { r, g, b, a }
+    }
+}
+
+impl Default for OverlayStyleSettings {
+    fn default() -> Self {
+        Self {
+            title_size: 18.0,
+            subtitle_size: 12.0,
+            group_heading_size: 13.0,
+            action_text_size: 12.0,
+            action_text_y_offset: -0.75,
+            keycap_text_size: 9.5,
+            card_background: RgbaColor::rgba(252, 251, 247, 242),
+            card_border: RgbaColor::rgba(210, 210, 205, 170),
+            title_color: RgbaColor::rgba(42, 42, 38, 255),
+            group_heading_color: RgbaColor::rgba(34, 34, 31, 255),
+            action_text_color: RgbaColor::rgba(52, 52, 48, 255),
+            weak_text_color: RgbaColor::rgba(118, 116, 108, 255),
+            divider_color: RgbaColor::rgba(202, 202, 196, 140),
+            keycap_background: RgbaColor::rgba(246, 245, 241, 230),
+            keycap_border: RgbaColor::rgba(170, 170, 164, 170),
+            keycap_text_color: RgbaColor::rgba(44, 44, 40, 255),
+            card_padding: 24.0,
+            row_height: 18.0,
+            combo_width: 112.0,
+            action_gap: 8.0,
+            keycap_height: 16.0,
+            keycap_gap: 3.0,
+            card_radius: 6.0,
+            show_column_dividers: true,
+            show_resize_grip: true,
+            show_empty_message: true,
         }
     }
 }
@@ -77,6 +169,39 @@ impl AppSettings {
         if let Some(window) = &mut self.window {
             window.normalize();
         }
+        self.overlay_style.normalize();
+    }
+}
+
+impl OverlayStyleSettings {
+    pub fn normalize(&mut self) {
+        let defaults = Self::default();
+        self.title_size = normalize_f32(self.title_size, 10.0, 36.0, defaults.title_size);
+        self.subtitle_size = normalize_f32(self.subtitle_size, 8.0, 24.0, defaults.subtitle_size);
+        self.group_heading_size = normalize_f32(
+            self.group_heading_size,
+            8.0,
+            24.0,
+            defaults.group_heading_size,
+        );
+        self.action_text_size =
+            normalize_f32(self.action_text_size, 8.0, 24.0, defaults.action_text_size);
+        self.action_text_y_offset = normalize_f32(
+            self.action_text_y_offset,
+            -6.0,
+            6.0,
+            defaults.action_text_y_offset,
+        );
+        self.keycap_text_size =
+            normalize_f32(self.keycap_text_size, 7.0, 18.0, defaults.keycap_text_size);
+        self.card_padding = normalize_f32(self.card_padding, 0.0, 64.0, defaults.card_padding);
+        self.keycap_height = normalize_f32(self.keycap_height, 10.0, 28.0, defaults.keycap_height);
+        self.row_height =
+            normalize_f32(self.row_height, 12.0, 40.0, defaults.row_height).max(self.keycap_height);
+        self.combo_width = normalize_f32(self.combo_width, 64.0, 220.0, defaults.combo_width);
+        self.action_gap = normalize_f32(self.action_gap, 0.0, 32.0, defaults.action_gap);
+        self.keycap_gap = normalize_f32(self.keycap_gap, 0.0, 16.0, defaults.keycap_gap);
+        self.card_radius = normalize_f32(self.card_radius, 0.0, 24.0, defaults.card_radius);
     }
 }
 
@@ -108,6 +233,14 @@ impl WindowPlacement {
 fn normalized_dimension(value: f32, minimum: f32, default: f32) -> f32 {
     if value.is_finite() {
         value.max(minimum)
+    } else {
+        default
+    }
+}
+
+fn normalize_f32(value: f32, min: f32, max: f32, default: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(min, max)
     } else {
         default
     }
@@ -149,19 +282,10 @@ struct StoredUserCatalog {
     apps: BTreeMap<String, Vec<StoredShortcutEntry>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct AppSheet {
     pub config: AppSheetConfig,
     pub patches: Vec<UserShortcutPatch>,
-}
-
-impl Default for AppSheet {
-    fn default() -> Self {
-        Self {
-            config: AppSheetConfig::default(),
-            patches: Vec::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
