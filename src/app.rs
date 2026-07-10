@@ -1388,8 +1388,17 @@ fn shortcut_card_outer_inset(view: AppView) -> f32 {
     }
 }
 
-fn keycap_width(label: &str) -> f32 {
-    (label.chars().count() as f32 * 5.8 + 9.0).max(16.0)
+fn measure_keycap_label_width(ui: &egui::Ui, label: &str, style: ResolvedOverlayStyle) -> f32 {
+    (ui.painter()
+        .layout_no_wrap(
+            label.to_owned(),
+            egui::FontId::monospace(style.keycap_text_size),
+            style.palette.keycap_text,
+        )
+        .size()
+        .x
+        + 9.0)
+        .max(16.0)
 }
 
 fn keycap_text_position(rect: egui::Rect) -> egui::Pos2 {
@@ -1400,10 +1409,29 @@ fn shortcut_action_text_position(rect: egui::Rect, y_offset: f32) -> egui::Pos2 
     egui::pos2(rect.left(), rect.center().y + y_offset)
 }
 
-fn combo_keycap_width_for_style(parts: &[&str], style: ResolvedOverlayStyle) -> f32 {
-    let labels_width = parts.iter().map(|part| keycap_width(part)).sum::<f32>();
+fn measure_combo_run_width(ui: &egui::Ui, parts: &[&str], style: ResolvedOverlayStyle) -> f32 {
+    let labels_width = parts
+        .iter()
+        .map(|part| measure_keycap_label_width(ui, part, style))
+        .sum::<f32>();
     let gaps = parts.len().saturating_sub(1) as f32 * style.keycap_gap;
     labels_width + gaps
+}
+
+#[allow(dead_code)]
+fn measure_action_width(ui: &egui::Ui, action: &str, style: ResolvedOverlayStyle) -> f32 {
+    ui.painter()
+        .layout_no_wrap(
+            action.to_owned(),
+            egui::FontId::proportional(style.action_text_size),
+            style.palette.text,
+        )
+        .size()
+        .x
+}
+
+fn overflow_tooltip_text(full_text: &str, overflowed: bool) -> Option<&str> {
+    overflowed.then_some(full_text)
 }
 
 fn should_show_resize_grip(style: ResolvedOverlayStyle) -> bool {
@@ -1464,15 +1492,9 @@ fn show_resize_grip(
     response
 }
 
-fn keycap_combo_start_x(
-    rect_left: f32,
-    rect_right: f32,
-    parts: &[&str],
-    style: ResolvedOverlayStyle,
-) -> f32 {
-    let total_width = combo_keycap_width_for_style(parts, style);
-    let start_x = rect_right - total_width;
-    if total_width > rect_right - rect_left {
+fn keycap_combo_start_x(rect_left: f32, rect_right: f32, measured_total_run_width: f32) -> f32 {
+    let start_x = rect_right - measured_total_run_width;
+    if measured_total_run_width > rect_right - rect_left {
         start_x
     } else {
         start_x.max(rect_left)
@@ -1484,27 +1506,30 @@ fn show_keycap_combo(
     rect: egui::Rect,
     combo: &str,
     style: ResolvedOverlayStyle,
-) {
+) -> bool {
     let palette = style.palette;
     let parts = combo_keycap_parts(combo);
     if parts.is_empty() {
-        return;
+        return false;
     }
 
-    let mut x = keycap_combo_start_x(rect.left(), rect.right(), &parts, style);
+    let measured_total_run_width = measure_combo_run_width(ui, &parts, style);
+    let overflowed = measured_total_run_width > rect.width();
+    let mut x = keycap_combo_start_x(rect.left(), rect.right(), measured_total_run_width);
     let y = rect.center().y - style.keycap_height / 2.0;
+    let painter = ui.painter().with_clip_rect(rect);
     for part in parts {
-        let width = keycap_width(part);
+        let width = measure_keycap_label_width(ui, part, style);
         let key_rect =
             egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(width, style.keycap_height));
-        ui.painter().rect_filled(key_rect, 3.0, palette.keycap_fill);
-        ui.painter().rect_stroke(
+        painter.rect_filled(key_rect, 3.0, palette.keycap_fill);
+        painter.rect_stroke(
             key_rect,
             3.0,
             egui::Stroke::new(0.8, palette.keycap_border),
             egui::StrokeKind::Inside,
         );
-        ui.painter().text(
+        painter.text(
             keycap_text_position(key_rect),
             egui::Align2::CENTER_CENTER,
             part,
@@ -1513,6 +1538,7 @@ fn show_keycap_combo(
         );
         x += width + style.keycap_gap;
     }
+    overflowed
 }
 
 fn show_shortcut_action_text(
@@ -1872,11 +1898,14 @@ fn show_shortcut_columns(
             for entry in entries {
                 column.horizontal(|ui| {
                     ui.set_min_height(style.row_height);
-                    let (combo_rect, _) = ui.allocate_exact_size(
+                    let (combo_rect, combo_response) = ui.allocate_exact_size(
                         egui::vec2(style.combo_width, style.row_height),
                         egui::Sense::hover(),
                     );
-                    show_keycap_combo(ui, combo_rect, &entry.combo, style);
+                    let combo_overflowed = show_keycap_combo(ui, combo_rect, &entry.combo, style);
+                    if let Some(full_text) = overflow_tooltip_text(&entry.combo, combo_overflowed) {
+                        combo_response.on_hover_text(full_text);
+                    }
                     ui.add_space(style.action_gap);
                     let (action_rect, _) = ui.allocate_exact_size(
                         egui::vec2(ui.available_width(), style.row_height),
@@ -2188,6 +2217,47 @@ mod tests {
     use super::*;
     use global_hotkey::hotkey::{Code, Modifiers};
 
+    #[allow(deprecated)]
+    fn with_font_measurement_ui(run_ui: impl FnOnce(&mut egui::Ui)) {
+        let ctx = egui::Context::default();
+        install_korean_font(&ctx).expect("production Korean font installation should succeed");
+        let mut run_ui = Some(run_ui);
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                run_ui
+                    .take()
+                    .expect("measurement UI should run exactly once")(ui);
+            });
+        });
+    }
+
+    #[allow(deprecated)]
+    fn render_shortcut_columns_frame(
+        ctx: &egui::Context,
+        entry: &ShortcutEntry,
+        style: ResolvedOverlayStyle,
+        pointer_pos: Option<egui::Pos2>,
+        time: f64,
+    ) -> egui::FullOutput {
+        let mut input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 300.0),
+            )),
+            time: Some(time),
+            ..Default::default()
+        };
+        if let Some(pointer_pos) = pointer_pos {
+            input.events.push(egui::Event::PointerMoved(pointer_pos));
+        }
+
+        ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                show_shortcut_columns(ui, std::slice::from_ref(entry), style);
+            });
+        })
+    }
+
     #[test]
     fn settings_section_defaults_to_general() {
         assert_eq!(SettingsSection::default(), SettingsSection::General);
@@ -2307,6 +2377,94 @@ mod tests {
             combo_keycap_parts(" Ctrl + Shift + P "),
             vec!["Ctrl", "Shift", "P"]
         );
+    }
+
+    #[test]
+    fn measurement_context_uses_installed_korean_font() {
+        with_font_measurement_ui(|ui| {
+            let style = resolved_overlay_style(&OverlayStyleSettings::default(), 0.96);
+
+            assert!(ui.ctx().fonts_mut(|fonts| {
+                fonts.has_glyph(&egui::FontId::monospace(style.keycap_text_size), '한')
+            }));
+            assert!(ui.ctx().fonts_mut(|fonts| {
+                fonts.has_glyph(&egui::FontId::proportional(style.action_text_size), '글')
+            }));
+        });
+    }
+
+    #[test]
+    fn keycap_width_tracks_resolved_font_metrics() {
+        with_font_measurement_ui(|ui| {
+            let default_style = resolved_overlay_style(&OverlayStyleSettings::default(), 0.96);
+            let maximum_style = resolved_overlay_style(
+                &OverlayStyleSettings {
+                    keycap_text_size: 18.0,
+                    ..Default::default()
+                },
+                0.96,
+            );
+
+            let one_glyph = measure_keycap_label_width(ui, "한", default_style);
+            let longer_label = measure_keycap_label_width(ui, "한글키캡", default_style);
+            let maximum_size = measure_keycap_label_width(ui, "한글키캡", maximum_style);
+            let raw_label_width = ui
+                .painter()
+                .layout_no_wrap(
+                    "한글키캡".to_owned(),
+                    egui::FontId::monospace(default_style.keycap_text_size),
+                    default_style.palette.keycap_text,
+                )
+                .size()
+                .x;
+
+            assert!(longer_label > one_glyph);
+            assert!(maximum_size > longer_label);
+            assert!((longer_label - (raw_label_width + 9.0).max(16.0)).abs() < 0.01);
+            assert_eq!(measure_keycap_label_width(ui, "", default_style), 16.0);
+        });
+    }
+
+    #[test]
+    fn combo_run_width_includes_configured_keycap_gap() {
+        with_font_measurement_ui(|ui| {
+            let style = resolved_overlay_style(
+                &OverlayStyleSettings {
+                    keycap_gap: 11.0,
+                    ..Default::default()
+                },
+                0.96,
+            );
+            let parts = ["Ctrl", "Shift", "명령"];
+            let labels_width = parts
+                .iter()
+                .map(|part| measure_keycap_label_width(ui, part, style))
+                .sum::<f32>();
+            let run_width = measure_combo_run_width(ui, &parts, style);
+
+            assert!((run_width - labels_width - style.keycap_gap * 2.0).abs() < 0.01);
+        });
+    }
+
+    #[test]
+    fn action_width_uses_resolved_proportional_font() {
+        with_font_measurement_ui(|ui| {
+            let default_style = resolved_overlay_style(&OverlayStyleSettings::default(), 0.96);
+            let maximum_style = resolved_overlay_style(
+                &OverlayStyleSettings {
+                    action_text_size: 24.0,
+                    ..Default::default()
+                },
+                0.96,
+            );
+
+            let one_glyph = measure_action_width(ui, "한", default_style);
+            let longer_label = measure_action_width(ui, "한글 설명 문구", default_style);
+            let maximum_size = measure_action_width(ui, "한글 설명 문구", maximum_style);
+
+            assert!(longer_label > one_glyph);
+            assert!(maximum_size > longer_label);
+        });
     }
 
     #[test]
@@ -2578,13 +2736,169 @@ mod tests {
 
     #[test]
     fn long_keycap_combos_keep_right_edge_aligned() {
-        let style = resolved_overlay_style(&OverlayStyleSettings::default(), 0.96);
-        let parts = combo_keycap_parts("Ctrl+Shift+Space");
-        let start = keycap_combo_start_x(0.0, style.combo_width, &parts, style);
+        with_font_measurement_ui(|ui| {
+            let style = resolved_overlay_style(&OverlayStyleSettings::default(), 0.96);
+            let parts = combo_keycap_parts("Ctrl+Shift+Space");
+            let run_width = measure_combo_run_width(ui, &parts, style);
+            let start = keycap_combo_start_x(0.0, style.combo_width, run_width);
 
-        assert!(
-            (start + combo_keycap_width_for_style(&parts, style) - style.combo_width).abs() < 0.01
+            assert!((start + run_width - style.combo_width).abs() < 0.01);
+        });
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn oversized_combo_is_clipped_from_the_left_and_keeps_right_edge() {
+        let ctx = egui::Context::default();
+        install_korean_font(&ctx).expect("production Korean font installation should succeed");
+        let style = resolved_overlay_style(
+            &OverlayStyleSettings {
+                combo_width: 220.0,
+                ..Default::default()
+            },
+            0.96,
         );
+        let combo = "Ctrl+Shift+Alt+Super+Command+Option+Delete+Enter";
+        let combo_rect =
+            egui::Rect::from_min_size(egui::pos2(40.0, 40.0), egui::vec2(220.0, style.row_height));
+        let mut overflowed = None;
+        let mut run_width = None;
+
+        let output = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let parts = combo_keycap_parts(combo);
+                let measured_width = measure_combo_run_width(ui, &parts, style);
+                run_width = Some(measured_width);
+                overflowed = Some(show_keycap_combo(ui, combo_rect, combo, style));
+            });
+        });
+
+        let run_width = run_width.expect("combo should be measured");
+        assert!(run_width > combo_rect.width());
+        assert_eq!(overflowed, Some(true));
+        assert!(
+            keycap_combo_start_x(combo_rect.left(), combo_rect.right(), run_width)
+                < combo_rect.left()
+        );
+
+        let keycap_shapes = output.shapes.iter().filter(|clipped| match &clipped.shape {
+            egui::Shape::Rect(shape) => {
+                shape.fill == style.palette.keycap_fill
+                    || shape.stroke.color == style.palette.keycap_border
+            }
+            egui::Shape::Text(shape) => shape.fallback_color == style.palette.keycap_text,
+            _ => false,
+        });
+        let keycap_shapes = keycap_shapes.collect::<Vec<_>>();
+        assert!(!keycap_shapes.is_empty());
+        assert!(
+            keycap_shapes
+                .iter()
+                .all(|shape| shape.clip_rect == combo_rect)
+        );
+
+        let rightmost_badge_edge = keycap_shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Rect(shape) if shape.fill == style.palette.keycap_fill => {
+                    Some(shape.rect.right())
+                }
+                _ => None,
+            })
+            .max_by(f32::total_cmp)
+            .expect("at least one keycap fill should be painted");
+        assert!((rightmost_badge_edge - combo_rect.right()).abs() < 0.01);
+    }
+
+    #[test]
+    fn clipped_combo_requests_full_text_tooltip() {
+        let ctx = egui::Context::default();
+        install_korean_font(&ctx).expect("production Korean font installation should succeed");
+        ctx.global_style_mut(|style| {
+            style.interaction.tooltip_delay = 0.0;
+            style.interaction.show_tooltips_only_when_still = false;
+        });
+        let style = resolved_overlay_style(
+            &OverlayStyleSettings {
+                combo_width: 220.0,
+                ..Default::default()
+            },
+            0.96,
+        );
+        let combo = "Ctrl+Shift+Alt+Super+Command+Option+Delete+Enter";
+        let entry = ShortcutEntry {
+            combo: combo.to_owned(),
+            action: "Command palette".to_owned(),
+            group: "Commands".to_owned(),
+            source: crate::core::ShortcutSource::User,
+        };
+
+        let first_frame = render_shortcut_columns_frame(&ctx, &entry, style, None, 0.0);
+        let combo_rect = first_frame
+            .shapes
+            .iter()
+            .find_map(|clipped| match &clipped.shape {
+                egui::Shape::Rect(shape) if shape.fill == style.palette.keycap_fill => {
+                    Some(clipped.clip_rect)
+                }
+                _ => None,
+            })
+            .expect("production renderer should paint the combo rail");
+        let _ = render_shortcut_columns_frame(&ctx, &entry, style, Some(combo_rect.center()), 1.0);
+        let hovered_frame = render_shortcut_columns_frame(&ctx, &entry, style, None, 2.0);
+
+        assert!(hovered_frame.shapes.iter().any(|clipped| {
+            matches!(
+                &clipped.shape,
+                egui::Shape::Text(shape) if shape.galley.job.text == combo
+            )
+        }));
+    }
+
+    #[test]
+    fn short_combo_does_not_request_full_text_tooltip() {
+        let ctx = egui::Context::default();
+        install_korean_font(&ctx).expect("production Korean font installation should succeed");
+        ctx.global_style_mut(|style| {
+            style.interaction.tooltip_delay = 0.0;
+            style.interaction.show_tooltips_only_when_still = false;
+        });
+        let style = resolved_overlay_style(
+            &OverlayStyleSettings {
+                combo_width: 220.0,
+                ..Default::default()
+            },
+            0.96,
+        );
+        let combo = "Ctrl+P";
+        let entry = ShortcutEntry {
+            combo: combo.to_owned(),
+            action: "Command palette".to_owned(),
+            group: "Commands".to_owned(),
+            source: crate::core::ShortcutSource::User,
+        };
+
+        let first_frame = render_shortcut_columns_frame(&ctx, &entry, style, None, 0.0);
+        let combo_rect = first_frame
+            .shapes
+            .iter()
+            .find_map(|clipped| match &clipped.shape {
+                egui::Shape::Rect(shape) if shape.fill == style.palette.keycap_fill => {
+                    Some(clipped.clip_rect)
+                }
+                _ => None,
+            })
+            .expect("production renderer should paint the combo rail");
+        let _ = render_shortcut_columns_frame(&ctx, &entry, style, Some(combo_rect.center()), 1.0);
+        let hovered_frame = render_shortcut_columns_frame(&ctx, &entry, style, None, 2.0);
+
+        assert!(!hovered_frame.shapes.iter().any(|clipped| {
+            matches!(
+                &clipped.shape,
+                egui::Shape::Text(shape) if shape.galley.job.text == combo
+            )
+        }));
+        assert_eq!(overflow_tooltip_text(combo, false), None);
     }
 
     #[test]
