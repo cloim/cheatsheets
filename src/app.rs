@@ -1194,6 +1194,105 @@ const KEYCAP_TEXT_Y_OFFSET: f32 = -0.75;
 const RESIZE_GRIP_SIZE: f32 = 18.0;
 const RESIZE_GRIP_INSET: f32 = 6.0;
 
+#[allow(dead_code)]
+fn target_action_width(measured_widths: &[f32]) -> f32 {
+    assert!(
+        measured_widths.iter().all(|width| width.is_finite()),
+        "action width measurements must be finite"
+    );
+    if measured_widths.is_empty() {
+        return 180.0;
+    }
+
+    let mut sorted_widths = measured_widths.to_vec();
+    sorted_widths.sort_by(f32::total_cmp);
+    let percentile_index = (sorted_widths.len() * 9).div_ceil(10) - 1;
+    sorted_widths[percentile_index].clamp(180.0, 320.0)
+}
+
+#[allow(dead_code)]
+fn target_combo_width(measured_widths: &[f32], configured_width: f32) -> f32 {
+    assert!(
+        configured_width.is_finite(),
+        "configured combo width must be finite"
+    );
+    assert!(
+        measured_widths.iter().all(|width| width.is_finite()),
+        "combo width measurements must be finite"
+    );
+    if measured_widths.is_empty() {
+        return configured_width.min(220.0);
+    }
+
+    let mut sorted_widths = measured_widths.to_vec();
+    sorted_widths.sort_by(f32::total_cmp);
+    let percentile_index = (sorted_widths.len() * 9).div_ceil(10) - 1;
+    sorted_widths[percentile_index]
+        .max(configured_width)
+        .min(220.0)
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct OverlayLayoutMetrics {
+    target_combo_width: f32,
+    target_action_width: f32,
+    column_count: usize,
+    column_width: f32,
+    action_width: f32,
+}
+
+#[allow(dead_code)]
+fn calculate_overlay_layout(
+    available_content_width: f32,
+    group_count: usize,
+    target_combo_width: f32,
+    target_action_width: f32,
+    row_item_spacing: f32,
+    action_gap: f32,
+    column_gap: f32,
+) -> OverlayLayoutMetrics {
+    assert!(group_count > 0, "group count must be greater than zero");
+    assert!(
+        [
+            available_content_width,
+            target_combo_width,
+            target_action_width,
+            row_item_spacing,
+            action_gap,
+            column_gap,
+        ]
+        .iter()
+        .all(|value| value.is_finite()),
+        "overlay layout inputs must be finite"
+    );
+
+    for column_count in (1..=group_count.min(4)).rev() {
+        let total_column_gap = column_count.saturating_sub(1) as f32 * column_gap;
+        let column_width = (available_content_width - total_column_gap) / column_count as f32;
+        let action_width = column_width - target_combo_width - row_item_spacing - action_gap;
+
+        if action_width >= target_action_width {
+            return OverlayLayoutMetrics {
+                target_combo_width,
+                target_action_width,
+                column_count,
+                column_width,
+                action_width,
+            };
+        }
+    }
+
+    let column_width = available_content_width.max(0.0);
+    OverlayLayoutMetrics {
+        target_combo_width,
+        target_action_width,
+        column_count: 1,
+        column_width,
+        action_width: (column_width - target_combo_width - row_item_spacing - action_gap).max(0.0),
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct ShortcutCardPalette {
     fill: egui::Color32,
@@ -2208,6 +2307,117 @@ mod tests {
             combo_keycap_parts(" Ctrl + Shift + P "),
             vec!["Ctrl", "Shift", "P"]
         );
+    }
+
+    #[test]
+    fn action_target_width_uses_nearest_rank_percentile_and_clamps() {
+        let unsorted = [
+            300.0, 100.0, 220.0, 180.0, 210.0, 200.0, 190.0, 230.0, 240.0, 250.0,
+        ];
+
+        assert_eq!(target_action_width(&unsorted), 250.0);
+        assert_eq!(target_action_width(&[42.0]), 180.0);
+        assert_eq!(target_action_width(&[500.0]), 320.0);
+        assert_eq!(target_action_width(&[]), 180.0);
+    }
+
+    #[test]
+    fn combo_target_width_honors_configured_minimum_and_cap() {
+        let unsorted = [
+            100.0, 120.0, 80.0, 110.0, 200.0, 90.0, 105.0, 115.0, 95.0, 130.0,
+        ];
+
+        assert_eq!(target_combo_width(&unsorted, 112.0), 130.0);
+        assert_eq!(target_combo_width(&[80.0], 140.0), 140.0);
+        assert_eq!(target_combo_width(&[300.0], 112.0), 220.0);
+        assert_eq!(target_combo_width(&[], 112.0), 112.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "combo width measurements must be finite")]
+    fn combo_target_width_rejects_non_finite_measurements() {
+        target_combo_width(&[f32::NAN], 112.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "configured combo width must be finite")]
+    fn combo_target_width_rejects_non_finite_configured_width() {
+        target_combo_width(&[112.0], f32::INFINITY);
+    }
+
+    #[test]
+    fn adaptive_columns_never_exceed_group_count() {
+        let two_groups = calculate_overlay_layout(4_000.0, 2, 112.0, 180.0, 12.0, 8.0, 12.0);
+        let three_groups = calculate_overlay_layout(4_000.0, 3, 112.0, 180.0, 12.0, 8.0, 12.0);
+
+        assert_eq!(two_groups.column_count, 2);
+        assert_eq!(three_groups.column_count, 3);
+    }
+
+    #[test]
+    fn one_group_layout_always_uses_one_column() {
+        let layout = calculate_overlay_layout(4_000.0, 1, 112.0, 180.0, 12.0, 8.0, 12.0);
+
+        assert_eq!(layout.column_count, 1);
+    }
+
+    #[test]
+    fn long_description_layout_uses_three_columns_at_current_width() {
+        let current = calculate_overlay_layout(1_715.0, 6, 170.0, 320.0, 12.0, 0.0, 12.0);
+        let minimum = calculate_overlay_layout(880.0, 6, 170.0, 320.0, 12.0, 0.0, 12.0);
+
+        assert_eq!(current.target_combo_width, 170.0);
+        assert_eq!(current.target_action_width, 320.0);
+        assert_eq!(current.column_count, 3);
+        assert_eq!(minimum.column_count, 1);
+    }
+
+    #[test]
+    fn short_wide_layout_uses_four_columns() {
+        let layout = calculate_overlay_layout(1_715.0, 6, 112.0, 180.0, 12.0, 8.0, 12.0);
+
+        assert_eq!(layout.column_count, 4);
+    }
+
+    #[test]
+    fn adding_column_preserves_target_action_width() {
+        let layout = calculate_overlay_layout(2_044.0, 6, 170.0, 320.0, 12.0, 0.0, 12.0);
+
+        assert_eq!(layout.column_count, 4);
+        assert_eq!(layout.action_width, layout.target_action_width);
+    }
+
+    #[test]
+    fn column_transition_keeps_target_action_width() {
+        let before = calculate_overlay_layout(1_529.5, 6, 170.0, 320.0, 12.0, 0.0, 12.0);
+        let at_transition = calculate_overlay_layout(1_530.0, 6, 170.0, 320.0, 12.0, 0.0, 12.0);
+
+        assert_eq!(before.column_count, 2);
+        assert_eq!(at_transition.column_count, 3);
+        assert!(before.action_width >= before.target_action_width);
+        assert!(at_transition.action_width >= at_transition.target_action_width);
+    }
+
+    #[test]
+    fn column_count_is_monotonic_across_resize_sequence() {
+        let widths = [880.0, 1_016.0, 1_529.0, 1_530.0, 2_043.0, 2_044.0];
+        let counts = widths.map(|width| {
+            calculate_overlay_layout(width, 6, 170.0, 320.0, 12.0, 0.0, 12.0).column_count
+        });
+
+        assert_eq!(counts, [1, 2, 2, 3, 3, 4]);
+        assert!(counts.windows(2).all(|pair| pair[0] <= pair[1]));
+    }
+
+    #[test]
+    fn maximum_style_values_reduce_columns_before_action_width_turns_negative() {
+        let layout = calculate_overlay_layout(1_715.0, 6, 220.0, 320.0, 12.0, 32.0, 12.0);
+        let cramped = calculate_overlay_layout(200.0, 6, 220.0, 320.0, 12.0, 32.0, 12.0);
+
+        assert_eq!(layout.column_count, 2);
+        assert!(layout.action_width >= layout.target_action_width);
+        assert_eq!(cramped.column_count, 1);
+        assert_eq!(cramped.action_width, 0.0);
     }
 
     #[test]
