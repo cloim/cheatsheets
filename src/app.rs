@@ -1405,6 +1405,7 @@ fn keycap_text_position(rect: egui::Rect) -> egui::Pos2 {
     rect.center() + egui::vec2(0.0, KEYCAP_TEXT_Y_OFFSET)
 }
 
+#[cfg(test)]
 fn shortcut_action_text_position(rect: egui::Rect, y_offset: f32) -> egui::Pos2 {
     egui::pos2(rect.left(), rect.center().y + y_offset)
 }
@@ -1428,6 +1429,55 @@ fn measure_action_width(ui: &egui::Ui, action: &str, style: ResolvedOverlayStyle
         )
         .size()
         .x
+}
+
+#[derive(Debug, Clone)]
+struct ShortcutActionLayout {
+    galley: Arc<egui::Galley>,
+    resolved_row_height: f32,
+    galley_rect: egui::Rect,
+    elided: bool,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn layout_shortcut_action(
+    ui: &egui::Ui,
+    action: &str,
+    action_width: f32,
+    max_rows: usize,
+    action_font: egui::FontId,
+    action_color: egui::Color32,
+    configured_row_height: f32,
+    keycap_height: f32,
+    action_text_y_offset: f32,
+) -> ShortcutActionLayout {
+    let mut job =
+        egui::text::LayoutJob::simple(action.to_owned(), action_font, action_color, action_width);
+    job.wrap = egui::text::TextWrapping {
+        max_width: action_width,
+        max_rows,
+        break_anywhere: true,
+        ..Default::default()
+    };
+    let galley = ui.painter().layout_job(job);
+    let resolved_row_height = configured_row_height
+        .max(keycap_height)
+        .max(galley.rect.height() + 2.0 * action_text_y_offset.abs());
+    let galley_rect = egui::Rect::from_min_size(
+        egui::pos2(
+            0.0,
+            (resolved_row_height - galley.rect.height()) / 2.0 + action_text_y_offset,
+        ),
+        galley.size(),
+    );
+    let elided = galley.elided;
+
+    ShortcutActionLayout {
+        galley,
+        resolved_row_height,
+        galley_rect,
+        elided,
+    }
 }
 
 fn overflow_tooltip_text(full_text: &str, overflowed: bool) -> Option<&str> {
@@ -1539,21 +1589,6 @@ fn show_keycap_combo(
         x += width + style.keycap_gap;
     }
     overflowed
-}
-
-fn show_shortcut_action_text(
-    ui: &mut egui::Ui,
-    rect: egui::Rect,
-    action: &str,
-    style: ResolvedOverlayStyle,
-) {
-    ui.painter().text(
-        shortcut_action_text_position(rect, style.action_text_y_offset),
-        egui::Align2::LEFT_CENTER,
-        action,
-        egui::FontId::proportional(style.action_text_size),
-        style.palette.text,
-    );
 }
 
 fn is_toggle_event(hotkey: Option<HotKey>, event: GlobalHotKeyEvent) -> bool {
@@ -1897,9 +1932,30 @@ fn show_shortcut_columns(
             column.add_space(6.0);
             for entry in entries {
                 column.horizontal(|ui| {
-                    ui.set_min_height(style.row_height);
+                    let action_width = (ui.available_width()
+                        - style.combo_width
+                        - ui.spacing().item_spacing.x
+                        - style.action_gap)
+                        .max(0.0);
+                    let ShortcutActionLayout {
+                        galley,
+                        resolved_row_height,
+                        galley_rect,
+                        elided,
+                    } = layout_shortcut_action(
+                        ui,
+                        &entry.action,
+                        action_width,
+                        if column_count == 1 { 2 } else { 1 },
+                        egui::FontId::proportional(style.action_text_size),
+                        palette.text,
+                        style.row_height,
+                        style.keycap_height,
+                        style.action_text_y_offset,
+                    );
+                    ui.set_min_height(resolved_row_height);
                     let (combo_rect, combo_response) = ui.allocate_exact_size(
-                        egui::vec2(style.combo_width, style.row_height),
+                        egui::vec2(style.combo_width, resolved_row_height),
                         egui::Sense::hover(),
                     );
                     let combo_overflowed = show_keycap_combo(ui, combo_rect, &entry.combo, style);
@@ -1907,11 +1963,18 @@ fn show_shortcut_columns(
                         combo_response.on_hover_text(full_text);
                     }
                     ui.add_space(style.action_gap);
-                    let (action_rect, _) = ui.allocate_exact_size(
-                        egui::vec2(ui.available_width(), style.row_height),
+                    let (action_rect, action_response) = ui.allocate_exact_size(
+                        egui::vec2(action_width, resolved_row_height),
                         egui::Sense::hover(),
                     );
-                    show_shortcut_action_text(ui, action_rect, &entry.action, style);
+                    ui.painter().with_clip_rect(action_rect).galley(
+                        action_rect.min + galley_rect.min.to_vec2(),
+                        galley,
+                        palette.text,
+                    );
+                    if let Some(full_text) = overflow_tooltip_text(&entry.action, elided) {
+                        action_response.on_hover_text(full_text);
+                    }
                 });
             }
         }
@@ -2258,6 +2321,59 @@ mod tests {
         })
     }
 
+    fn test_shortcut_action_layout(
+        ui: &egui::Ui,
+        action: &str,
+        action_width: f32,
+        max_rows: usize,
+        style: ResolvedOverlayStyle,
+    ) -> ShortcutActionLayout {
+        layout_shortcut_action(
+            ui,
+            action,
+            action_width,
+            max_rows,
+            egui::FontId::proportional(style.action_text_size),
+            style.palette.text,
+            style.row_height,
+            style.keycap_height,
+            style.action_text_y_offset,
+        )
+    }
+
+    fn assert_action_layout_inside_clip(layout: &ShortcutActionLayout, action_width: f32) {
+        let action_rect = egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(action_width, layout.resolved_row_height),
+        );
+
+        assert!(
+            action_rect.contains_rect(layout.galley_rect),
+            "shifted galley {:?} must stay inside action rect {:?}",
+            layout.galley_rect,
+            action_rect
+        );
+    }
+
+    fn rendered_action_clip(
+        output: &egui::FullOutput,
+        action: &str,
+        action_color: egui::Color32,
+    ) -> egui::Rect {
+        output
+            .shapes
+            .iter()
+            .find_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(shape)
+                    if shape.galley.job.text == action && shape.fallback_color == action_color =>
+                {
+                    Some(clipped.clip_rect)
+                }
+                _ => None,
+            })
+            .expect("production renderer should paint the shortcut action")
+    }
+
     #[test]
     fn settings_section_defaults_to_general() {
         assert_eq!(SettingsSection::default(), SettingsSection::General);
@@ -2465,6 +2581,314 @@ mod tests {
             assert!(longer_label > one_glyph);
             assert!(maximum_size > longer_label);
         });
+    }
+
+    #[test]
+    fn multi_column_action_uses_one_row_and_elides() {
+        with_font_measurement_ui(|ui| {
+            let style = resolved_overlay_style(&OverlayStyleSettings::default(), 0.96);
+            let action = "워크스페이스 전체 명령 팔레트를 열고 실행 가능한 작업을 검색합니다";
+            let action_width = 120.0;
+            let layout = test_shortcut_action_layout(ui, action, action_width, 1, style);
+
+            assert_eq!(layout.galley.job.wrap.max_width, action_width);
+            assert_eq!(layout.galley.job.wrap.max_rows, 1);
+            assert!(layout.galley.job.wrap.break_anywhere);
+            assert_eq!(layout.galley.job.wrap.overflow_character, Some('…'));
+            assert_eq!(layout.galley.rows.len(), 1);
+            assert!(layout.elided);
+            assert_action_layout_inside_clip(&layout, action_width);
+        });
+    }
+
+    #[test]
+    fn unbroken_action_stays_inside_available_width() {
+        with_font_measurement_ui(|ui| {
+            let style = resolved_overlay_style(&OverlayStyleSettings::default(), 0.96);
+            let action = "workspace/src/features/shortcut_overlay/extremely_long_command_name.rs";
+            let action_width = 96.0;
+            let layout = test_shortcut_action_layout(ui, action, action_width, 1, style);
+
+            assert!(layout.elided);
+            assert!(layout.galley_rect.width() <= action_width);
+            assert_action_layout_inside_clip(&layout, action_width);
+        });
+    }
+
+    #[test]
+    fn non_elided_action_does_not_request_tooltip() {
+        with_font_measurement_ui(|ui| {
+            let style = resolved_overlay_style(&OverlayStyleSettings::default(), 0.96);
+            let action = "파일 열기";
+            let layout = test_shortcut_action_layout(ui, action, 240.0, 1, style);
+
+            assert!(!layout.elided);
+            assert_eq!(overflow_tooltip_text(action, layout.elided), None);
+        });
+    }
+
+    #[test]
+    fn elided_action_requests_full_text_tooltip() {
+        with_font_measurement_ui(|ui| {
+            let style = resolved_overlay_style(&OverlayStyleSettings::default(), 0.96);
+            let action = "현재 Project의 모든 파일과 Korean symbol을 빠르게 검색합니다";
+            let layout = test_shortcut_action_layout(ui, action, 110.0, 1, style);
+
+            assert!(layout.elided);
+            assert_eq!(overflow_tooltip_text(action, layout.elided), Some(action));
+        });
+    }
+
+    #[test]
+    fn action_row_contains_positive_and_negative_optical_offsets() {
+        with_font_measurement_ui(|ui| {
+            for offset in [-6.0, 6.0] {
+                let style = resolved_overlay_style(
+                    &OverlayStyleSettings {
+                        action_text_y_offset: offset,
+                        ..Default::default()
+                    },
+                    0.96,
+                );
+                let layout = test_shortcut_action_layout(ui, "한글 Action", 240.0, 1, style);
+
+                assert!(
+                    layout.resolved_row_height >= layout.galley.rect.height() + 2.0 * offset.abs()
+                );
+                assert!(layout.resolved_row_height >= style.row_height);
+                assert!(layout.resolved_row_height >= style.keycap_height);
+                assert_action_layout_inside_clip(&layout, 240.0);
+            }
+        });
+    }
+
+    #[test]
+    fn single_column_action_uses_at_most_two_rows() {
+        with_font_measurement_ui(|ui| {
+            let style = resolved_overlay_style(&OverlayStyleSettings::default(), 0.96);
+            let action = "현재 파일의 모든 symbol과 참조 위치를 찾아 두 줄을 넘는 상세 결과까지 빠르게 확인합니다";
+            let action_width = 150.0;
+            let layout = test_shortcut_action_layout(ui, action, action_width, 2, style);
+
+            assert_eq!(layout.galley.job.wrap.max_rows, 2);
+            assert_eq!(layout.galley.rows.len(), 2);
+            assert!(layout.elided);
+            assert_action_layout_inside_clip(&layout, action_width);
+        });
+    }
+
+    #[test]
+    fn single_column_action_height_expands_for_second_row() {
+        with_font_measurement_ui(|ui| {
+            let style = resolved_overlay_style(&OverlayStyleSettings::default(), 0.96);
+            let action =
+                "선택한 파일의 변경 내용을 비교하고 이전 revision과 현재 상태를 함께 표시합니다";
+            let action_width = 165.0;
+            let layout = test_shortcut_action_layout(ui, action, action_width, 2, style);
+
+            assert_eq!(layout.galley.rows.len(), 2);
+            assert!(layout.resolved_row_height > style.row_height);
+            assert!(
+                layout.resolved_row_height
+                    >= layout.galley.rect.height() + 2.0 * style.action_text_y_offset.abs()
+            );
+            assert_action_layout_inside_clip(&layout, action_width);
+        });
+    }
+
+    #[test]
+    fn single_column_row_height_honors_configured_minimum() {
+        with_font_measurement_ui(|ui| {
+            let style = resolved_overlay_style(
+                &OverlayStyleSettings {
+                    row_height: 48.0,
+                    ..Default::default()
+                },
+                0.96,
+            );
+            let layout = test_shortcut_action_layout(ui, "설정 열기", 240.0, 2, style);
+
+            assert!(layout.resolved_row_height >= style.row_height);
+            assert!(layout.resolved_row_height >= style.keycap_height);
+            assert!(
+                layout.resolved_row_height
+                    >= layout.galley.rect.height() + 2.0 * style.action_text_y_offset.abs()
+            );
+            assert_action_layout_inside_clip(&layout, 240.0);
+        });
+    }
+
+    #[test]
+    fn production_action_shape_uses_exact_action_clip() {
+        let ctx = egui::Context::default();
+        install_korean_font(&ctx).expect("production Korean font installation should succeed");
+        let style = resolved_overlay_style(&OverlayStyleSettings::default(), 0.96);
+        let action = "워크스페이스 전체 명령 팔레트를 열고 실행 가능한 작업을 빠르게 검색합니다";
+        let entry = ShortcutEntry {
+            combo: "Ctrl+Shift+P".to_owned(),
+            action: action.to_owned(),
+            group: "탐색".to_owned(),
+            source: crate::core::ShortcutSource::User,
+        };
+
+        let output = render_shortcut_columns_frame(&ctx, &entry, style, None, 0.0);
+        let combo_clip = output
+            .shapes
+            .iter()
+            .find_map(|clipped| match &clipped.shape {
+                egui::Shape::Rect(shape) if shape.fill == style.palette.keycap_fill => {
+                    Some(clipped.clip_rect)
+                }
+                _ => None,
+            })
+            .expect("production renderer should paint the combo rail");
+        let action_clip = rendered_action_clip(&output, action, style.palette.text);
+        let action_position = output
+            .shapes
+            .iter()
+            .find_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(shape)
+                    if shape.galley.job.text == action
+                        && shape.fallback_color == style.palette.text =>
+                {
+                    Some(shape.pos)
+                }
+                _ => None,
+            })
+            .expect("production renderer should paint the action galley");
+        let item_spacing = ctx.global_style().spacing.item_spacing.x;
+
+        assert!((action_clip.left() - action_position.x).abs() < 0.01);
+        assert!(
+            (action_clip.left() - (combo_clip.right() + item_spacing + style.action_gap)).abs()
+                < 0.01
+        );
+        assert!((action_clip.top() - combo_clip.top()).abs() < 0.01);
+        assert!((action_clip.bottom() - combo_clip.bottom()).abs() < 0.01);
+        assert!(action_clip.right() < 800.0);
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn single_column_action_renderer_uses_two_rows() {
+        let ctx = egui::Context::default();
+        install_korean_font(&ctx).expect("production Korean font installation should succeed");
+        let style = resolved_overlay_style(&OverlayStyleSettings::default(), 0.96);
+        let action = "현재 파일의 모든 심볼과 참조 위치를 찾아 변경 이력 및 관련 명령을 두 줄 범위에서 확인하고 나머지는 생략합니다";
+        let entry = ShortcutEntry {
+            combo: "Ctrl+Shift+O".to_owned(),
+            action: action.to_owned(),
+            group: "탐색".to_owned(),
+            source: crate::core::ShortcutSource::User,
+        };
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(460.0, 300.0),
+            )),
+            ..Default::default()
+        };
+
+        let output = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                show_shortcut_columns(ui, std::slice::from_ref(&entry), style);
+            });
+        });
+        let action_shape = output
+            .shapes
+            .iter()
+            .find_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(shape)
+                    if shape.galley.job.text == action
+                        && shape.fallback_color == style.palette.text =>
+                {
+                    Some(shape)
+                }
+                _ => None,
+            })
+            .expect("single-column renderer should paint the action galley");
+
+        assert_eq!(action_shape.galley.job.wrap.max_rows, 2);
+        assert_eq!(action_shape.galley.rows.len(), 2);
+        assert!(action_shape.galley.elided);
+    }
+
+    #[test]
+    fn action_response_tooltip_uses_exact_full_text_only_when_elided() {
+        let long_ctx = egui::Context::default();
+        install_korean_font(&long_ctx).expect("production Korean font installation should succeed");
+        long_ctx.global_style_mut(|style| {
+            style.interaction.tooltip_delay = 0.0;
+            style.interaction.show_tooltips_only_when_still = false;
+        });
+        let style = resolved_overlay_style(&OverlayStyleSettings::default(), 0.96);
+        let long_action =
+            "현재 Project의 모든 파일과 Korean symbol을 빠르게 검색하고 결과 위치로 이동합니다";
+        let long_entry = ShortcutEntry {
+            combo: "Ctrl+Shift+F".to_owned(),
+            action: long_action.to_owned(),
+            group: "탐색".to_owned(),
+            source: crate::core::ShortcutSource::User,
+        };
+
+        let first_long_frame =
+            render_shortcut_columns_frame(&long_ctx, &long_entry, style, None, 0.0);
+        let long_action_clip =
+            rendered_action_clip(&first_long_frame, long_action, style.palette.text);
+        let _ = render_shortcut_columns_frame(
+            &long_ctx,
+            &long_entry,
+            style,
+            Some(long_action_clip.center()),
+            1.0,
+        );
+        let hovered_long_frame =
+            render_shortcut_columns_frame(&long_ctx, &long_entry, style, None, 2.0);
+
+        assert!(hovered_long_frame.shapes.iter().any(|clipped| {
+            clipped.clip_rect != long_action_clip
+                && matches!(
+                    &clipped.shape,
+                    egui::Shape::Text(shape) if shape.galley.job.text == long_action
+                )
+        }));
+
+        let short_ctx = egui::Context::default();
+        install_korean_font(&short_ctx)
+            .expect("production Korean font installation should succeed");
+        short_ctx.global_style_mut(|style| {
+            style.interaction.tooltip_delay = 0.0;
+            style.interaction.show_tooltips_only_when_still = false;
+        });
+        let short_action = "파일 열기";
+        let short_entry = ShortcutEntry {
+            combo: "Ctrl+O".to_owned(),
+            action: short_action.to_owned(),
+            group: "탐색".to_owned(),
+            source: crate::core::ShortcutSource::User,
+        };
+
+        let first_short_frame =
+            render_shortcut_columns_frame(&short_ctx, &short_entry, style, None, 0.0);
+        let short_action_clip =
+            rendered_action_clip(&first_short_frame, short_action, style.palette.text);
+        let _ = render_shortcut_columns_frame(
+            &short_ctx,
+            &short_entry,
+            style,
+            Some(short_action_clip.center()),
+            1.0,
+        );
+        let hovered_short_frame =
+            render_shortcut_columns_frame(&short_ctx, &short_entry, style, None, 2.0);
+
+        assert!(!hovered_short_frame.shapes.iter().any(|clipped| {
+            clipped.clip_rect != short_action_clip
+                && matches!(
+                    &clipped.shape,
+                    egui::Shape::Text(shape) if shape.galley.job.text == short_action
+                )
+        }));
     }
 
     #[test]
