@@ -2322,6 +2322,12 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "action width measurements must be finite")]
+    fn action_target_width_rejects_non_finite_measurements() {
+        target_action_width(&[f32::NAN]);
+    }
+
+    #[test]
     fn combo_target_width_honors_configured_minimum_and_cap() {
         let unsorted = [
             100.0, 120.0, 80.0, 110.0, 200.0, 90.0, 105.0, 115.0, 95.0, 130.0,
