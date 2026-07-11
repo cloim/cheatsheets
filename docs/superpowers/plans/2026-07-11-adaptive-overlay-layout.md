@@ -65,27 +65,27 @@ The group entry counts are `[4, 1, 3, 2, 4, 2]`. At `1715px` inner width, the ex
 - Produces: `OverlayLayoutMetrics` containing target widths, selected column count, final column width, and final action width.
 - Produces: `calculate_overlay_layout(available_content_width, group_count, target_combo_width, target_action_width, row_item_spacing, action_gap, column_gap) -> OverlayLayoutMetrics`, selecting `1..=min(4, group_count)` columns while retaining the target action width. `available_content_width` is the current `ui.available_width()` inside the padded card; this helper never consumes window width or card padding.
 
-- [ ] **Step 1: Add the failing action-target percentile test**
+- [x] **Step 1: Add the failing action-target percentile test**
 
   Add `action_target_width_uses_nearest_rank_percentile_and_clamps`. Cover an unsorted width list, the nearest-rank P90 result, the `180` minimum, the `320` maximum, and the empty-input result.
 
-- [ ] **Step 2: Run the percentile test and confirm RED**
+- [x] **Step 2: Run the percentile test and confirm RED**
 
   Run: `cargo test app::tests::action_target_width_uses_nearest_rank_percentile_and_clamps -- --exact`
 
   Expected: compilation fails because `target_action_width` does not exist.
 
-- [ ] **Step 3: Implement the minimum percentile and clamp behavior**
+- [x] **Step 3: Implement the minimum percentile and clamp behavior**
 
   Add only the constants and target-width helper required by the test. Require finite measurements, fail clearly if that precondition is broken, sort deterministically with total ordering, and use the normalized lower bound for an empty input. Do not silently discard an invalid measurement.
 
-- [ ] **Step 4: Run the percentile test and confirm GREEN**
+- [x] **Step 4: Run the percentile test and confirm GREEN**
 
   Run: `cargo test app::tests::action_target_width_uses_nearest_rank_percentile_and_clamps -- --exact`
 
   Expected: one test passes.
 
-- [ ] **Step 5: Add failing combo-target and column-selection tests**
+- [x] **Step 5: Add failing combo-target and column-selection tests**
 
   Add these tests:
 
@@ -101,23 +101,23 @@ The group entry counts are `[4, 1, 3, 2, 4, 2]`. At `1715px` inner width, the ex
 
   Use the canonical fixture's `1715px` inner content width directly. Test row item spacing and column gap as separate inputs even when both resolve to `12px`.
 
-- [ ] **Step 6: Run the adaptive layout tests and confirm RED**
+- [x] **Step 6: Run the adaptive layout tests and confirm RED**
 
   Run: `cargo test app::tests::`
 
   Expected: compilation fails because the combo target and layout calculator do not exist.
 
-- [ ] **Step 7: Implement the minimum adaptive layout calculator**
+- [x] **Step 7: Implement the minimum adaptive layout calculator**
 
   Select the greatest legal column count whose computed column width retains the requested action target. For each candidate, subtract column gaps only between columns; derive final action width by subtracting the combo rail, one row item spacing, and configured action gap from the equal column width. Clamp to the group count and four-column maximum. When the minimum useful width does not fit, return one column with a non-negative final action width and let the bounded overflow policy handle the remainder. A group count of zero remains outside this helper because the existing empty-state path returns before column rendering.
 
-- [ ] **Step 8: Run Task 1 tests and the existing app test module**
+- [x] **Step 8: Run Task 1 tests and the existing app test module**
 
   Run: `cargo test app::tests::`
 
   Expected: all app tests pass with no warnings.
 
-- [ ] **Step 9: Commit Task 1**
+- [x] **Step 9: Commit Task 1**
 
   Stage only `src/app.rs` and commit with message `feat: 콘텐츠 기반 오버레이 단 수 계산`.
 
@@ -139,7 +139,7 @@ The group entry counts are `[4, 1, 3, 2, 4, 2]`. At `1715px` inner width, the ex
 - Changes: `keycap_combo_start_x` consumes a measured total run width rather than recomputing a character-count estimate.
 - Changes: `show_keycap_combo` uses measured badge widths, clips both badge backgrounds and glyphs to the combo rectangle, preserves the rightmost final key, and reports whether clipping occurred.
 
-- [ ] **Step 1: Add failing font-measurement tests**
+- [x] **Step 1: Add failing font-measurement tests**
 
   Add these egui-backed tests using `egui::Context::default()`, the production `install_korean_font`, and `Context::run` rather than the empty-font `egui::__run_test_ui` helper:
 
@@ -150,43 +150,43 @@ The group entry counts are `[4, 1, 3, 2, 4, 2]`. At `1715px` inner width, the ex
 
   Confirm the production Korean font installation succeeds, compare one Korean glyph with a longer Korean label, compare default and maximum font sizes, and verify that a multi-part combo includes exactly the configured number of gaps.
 
-- [ ] **Step 2: Run the measurement tests and confirm RED**
+- [x] **Step 2: Run the measurement tests and confirm RED**
 
   Run: `cargo test app::tests::`
 
   Expected: compilation fails because the measurement helpers do not exist.
 
-- [ ] **Step 3: Implement font-backed measurement only**
+- [x] **Step 3: Implement font-backed measurement only**
 
   Use the active production egui fonts and the same font IDs used by rendering. Preserve the current total badge padding and minimum badge width. Remove the character-count width heuristic only after the new tests are red; do not let tests silently fall back to egui's empty font set.
 
-- [ ] **Step 4: Run the measurement tests and confirm GREEN**
+- [x] **Step 4: Run the measurement tests and confirm GREEN**
 
   Run: `cargo test app::tests::`
 
-  Expected: all three tests pass.
+  Expected: all four tests pass.
 
-- [ ] **Step 5: Add the failing combo containment test**
+- [x] **Step 5: Add the failing combo containment test**
 
   Add `oversized_combo_is_clipped_from_the_left_and_keeps_right_edge` and `clipped_combo_requests_full_text_tooltip`. Use a command-like combo whose measured run exceeds a `220px` rail. Verify the reported clipping state, right-edge alignment, and exact original combo exposed to the tooltip response.
 
-- [ ] **Step 6: Run the combo containment test and confirm RED**
+- [x] **Step 6: Run the combo containment test and confirm RED**
 
   Run: `cargo test app::tests::oversized_combo_is_clipped_from_the_left_and_keeps_right_edge -- --exact`
 
   Expected: the test fails because combo rendering does not report clipping or use a rail-specific clip.
 
-- [ ] **Step 7: Implement clipped measured keycap rendering**
+- [x] **Step 7: Implement clipped measured keycap rendering**
 
   Paint through `Painter::with_clip_rect(combo_rect)`. Keep the run right-aligned, return the clipping state, and use the shared overflow-tooltip contract on the existing combo allocation response so the exact full combo appears only when clipping occurs.
 
-- [ ] **Step 8: Run Task 2 tests and the existing right-edge regression**
+- [x] **Step 8: Run Task 2 tests and the existing right-edge regression**
 
   Run: `cargo test app::tests::`
 
   Expected: all matching tests pass.
 
-- [ ] **Step 9: Commit Task 2**
+- [x] **Step 9: Commit Task 2**
 
   Stage only `src/app.rs` and commit with message `feat: 키캡 폭을 실제 글리프로 계산`.
 
@@ -206,7 +206,7 @@ The group entry counts are `[4, 1, 3, 2, 4, 2]`. At `1715px` inner width, the ex
 - Changes: the existing action renderer paints the prepared galley through `Painter::with_clip_rect(action_rect)` without extracting a second one-use paint helper.
 - Changes: the action allocation response uses the shared overflow-tooltip contract and receives the exact complete action only when `Galley::elided` is true.
 
-- [ ] **Step 1: Add the failing multi-column action tests**
+- [x] **Step 1: Add the failing multi-column action tests**
 
   Add these tests:
 
@@ -218,23 +218,23 @@ The group entry counts are `[4, 1, 3, 2, 4, 2]`. At `1715px` inner width, the ex
 
   Use Korean text, mixed Korean/English text, a whitespace-free path-like token, and both normalized optical-offset extremes (`-6px` and `+6px`). Assert that the shifted galley rectangle remains inside the action rectangle in each case.
 
-- [ ] **Step 2: Run the multi-column tests and confirm RED**
+- [x] **Step 2: Run the multi-column tests and confirm RED**
 
   Run: `cargo test app::tests::`
 
   Expected: compilation fails because `ShortcutActionLayout` and the layout helper do not exist.
 
-- [ ] **Step 3: Implement one-row bounded action layout**
+- [x] **Step 3: Implement one-row bounded action layout**
 
   Build a `LayoutJob` with `max_rows = 1`, the exact action width, and break-anywhere enabled. Derive tooltip need from `Galley::elided`. Keep the existing action color and font size, and include the absolute optical offset when resolving row height so vertical clipping cannot cut a shifted galley.
 
-- [ ] **Step 4: Run the multi-column tests and confirm GREEN**
+- [x] **Step 4: Run the multi-column tests and confirm GREEN**
 
   Run: `cargo test app::tests::`
 
   Expected: all matching tests pass.
 
-- [ ] **Step 5: Add the failing single-column two-row tests**
+- [x] **Step 5: Add the failing single-column two-row tests**
 
   Add these tests:
 
@@ -244,23 +244,23 @@ The group entry counts are `[4, 1, 3, 2, 4, 2]`. At `1715px` inner width, the ex
 
   Verify that a long action uses two rows, reports elision beyond the second row, and produces a row height at least as large as the configured minimum, keycap, and shifted galley bounds.
 
-- [ ] **Step 6: Run the two-row tests and confirm RED**
+- [x] **Step 6: Run the two-row tests and confirm RED**
 
   Run: `cargo test app::tests::single_column_action`
 
   Expected: tests fail because the layout currently supports one unbounded painted line only.
 
-- [ ] **Step 7: Implement two-row single-column layout and clipped painting**
+- [x] **Step 7: Implement two-row single-column layout and clipped painting**
 
   Set `max_rows = 2` only when the selected column count is one. Allocate the row from the maximum of configured `row_height`, keycap height, and galley height plus twice the absolute optical offset; vertically align the galley with the keycap, paint through the action clip, and attach the exact full tooltip when elided.
 
-- [ ] **Step 8: Run Task 3 tests and action-position regressions**
+- [x] **Step 8: Run Task 3 tests and action-position regressions**
 
   Run: `cargo test app::tests::`
 
   Expected: all matching tests pass.
 
-- [ ] **Step 9: Commit Task 3**
+- [x] **Step 9: Commit Task 3**
 
   Stage only `src/app.rs` and commit with message `fix: 긴 단축키 설명을 단 안에 제한`.
 
@@ -281,7 +281,7 @@ The group entry counts are `[4, 1, 3, 2, 4, 2]`. At `1715px` inner width, the ex
 - Produces: `ShortcutRenderReport` containing the consumed metrics and ranges plus final column, combo, and action rectangles, overflow flags, and response IDs used by renderer tests.
 - Changes: `show_shortcut_columns(...) -> ShortcutRenderReport` prepares and consumes the new layout instead of fixed breakpoints and modulo assignment. The normal application call discards the report; renderer-level tests use it as the observable integration seam.
 
-- [ ] **Step 1: Add the failing ordered-partition tests**
+- [x] **Step 1: Add the failing ordered-partition tests**
 
   Add these tests:
 
@@ -292,23 +292,23 @@ The group entry counts are `[4, 1, 3, 2, 4, 2]`. At `1715px` inner width, the ex
 
   Enumerate every legal contiguous boundary for several small arrays, including `[100, 20, 20, 20]`, and compare the helper's maximum range height with the brute-force optimum. For the exact tie `[1, 1, 1]`, zero gap, and two columns, require `[0..1, 1..3]`. Separately prove that a two-group range includes one inter-group gap while a one-group range includes none.
 
-- [ ] **Step 2: Run the partition tests and confirm RED**
+- [x] **Step 2: Run the partition tests and confirm RED**
 
   Run: `cargo test app::tests::ordered_partition`
 
   Expected: compilation fails because the partition helper does not exist.
 
-- [ ] **Step 3: Implement the minimum contiguous balanced partition**
+- [x] **Step 3: Implement the minimum contiguous balanced partition**
 
   Preserve group order, cover every index exactly once, minimize the maximum range score using the explicit between-groups-only gap contract, and choose the lexicographically earliest complete boundary vector for equal optimum scores. The helper requires finite non-negative block heights, a finite non-negative gap, a non-empty group list, and `1..=group_count` columns; fail clearly when a precondition is broken. Return exactly the selected number of non-empty ranges.
 
-- [ ] **Step 4: Run the partition tests and confirm GREEN**
+- [x] **Step 4: Run the partition tests and confirm GREEN**
 
   Run: `cargo test app::tests::ordered_partition`
 
   Expected: all partition tests pass.
 
-- [ ] **Step 5: Add failing renderer-level integration tests**
+- [x] **Step 5: Add failing renderer-level integration tests**
 
   Add these tests against the production `show_shortcut_columns` entry point, using `egui::Context::run`, the installed Korean fonts, and the canonical in-memory fixture:
 
@@ -319,23 +319,23 @@ The group entry counts are `[4, 1, 3, 2, 4, 2]`. At `1715px` inner width, the ex
 
   The first test reads `ShortcutRenderReport` and requires three columns, `[0..2, 2..4, 4..6]`, one-row multi-column galleys, the measured group-height contract, and row rectangles contained by their assigned column. The shape test inspects `FullOutput.shapes`: action text shapes must carry the action rectangle clip, and every matching keycap background, border, and glyph shape must carry the combo rectangle clip. The hover test sets tooltip delay to zero, uses report rectangles to move the pointer over the canonical overflowed action and combo in separate frames, and finds the exact original strings in the tooltip text shapes. The maximum-style test uses `24px` action text, `18px` keycap text, `16px` keycap gap, `32px` action gap, `220px` configured combo width, and both `-6px` and `+6px` action offsets; it requires a non-negative action width and contained output after the column count is reduced.
 
-- [ ] **Step 6: Run renderer integration tests and confirm RED**
+- [x] **Step 6: Run renderer integration tests and confirm RED**
 
   Run: `cargo test app::tests::renderer_`
 
   Expected: compilation or assertions fail because the production renderer does not return a report, apply row-specific clip rectangles, attach observable tooltips, or consume the prepared adaptive layout.
 
-- [ ] **Step 7: Integrate the prepared layout into `show_shortcut_columns`**
+- [x] **Step 7: Integrate the prepared layout into `show_shortcut_columns`**
 
   Remove the `980/720/480` breakpoint branch and modulo group placement. Prepare the canonical layout path once per render, calculate group blocks without trailing gaps, prepare final row galleys once, draw only non-empty columns through column-specific clips, paint action and combo shapes through their row-specific clips, attach tooltips to the allocation responses, and populate `ShortcutRenderReport` from the geometry actually consumed. Retain the existing divider and vertical scroll behavior.
 
-- [ ] **Step 8: Run all app tests**
+- [x] **Step 8: Run all app tests**
 
   Run: `cargo test app::tests::`
 
   Expected: all app tests pass with no warnings.
 
-- [ ] **Step 9: Commit Task 4**
+- [x] **Step 9: Commit Task 4**
 
   Stage only `src/app.rs` and commit with message `feat: 그룹 순서를 보존해 오버레이 균형 배치`.
 
@@ -351,45 +351,51 @@ The group entry counts are `[4, 1, 3, 2, 4, 2]`. At `1715px` inner width, the ex
 - Consumes: the completed adaptive layout implementation.
 - Produces: verified debug and release builds, clean formatting and clippy output, complete automated tests, and visual evidence for the long-description fixture.
 
-- [ ] **Step 1: Run formatting verification**
+- [x] **Step 1: Run formatting verification**
 
   Run: `cargo fmt -- --check`
 
   Expected: exit code 0 with no diff.
 
-- [ ] **Step 2: Run clippy as an error gate**
+- [x] **Step 2: Run clippy as an error gate**
 
   Run: `cargo clippy --all-targets -- -D warnings`
 
   Expected: exit code 0 with no warnings.
 
-- [ ] **Step 3: Run the full test suite**
+- [x] **Step 3: Run the full test suite**
 
   Run: `cargo test`
 
   Expected: every existing and new test passes with zero failures.
 
-- [ ] **Step 4: Build the release binary**
+- [x] **Step 4: Build the release binary**
 
   Run: `cargo build --release`
 
   Expected: exit code 0 and a worktree-local `target/release/cheatsheets.exe`.
 
-- [ ] **Step 5: Verify the long-description layout visually**
+- [x] **Step 5: Verify the long-description layout visually**
 
   Use the current local `codex-acp` custom sheet as the live long-content sample; do not edit it. Before launch, stop other CheatSheets instances, record SHA-256 hashes for that sheet and `settings.json`, and save an exact temporary backup of `settings.json` because resizing updates window placement. Launch the worktree release binary, foreground Codex so this app sheet is selected, and capture four uncommitted review artifacts outside the repository: the overlay at `1755×873`, the overlay at `920×560`, one truncated action tooltip, and one clipped combo tooltip. If the expected `codex-acp` sheet is absent, stop and request a fixture instead of substituting another app silently.
 
   Confirm the wide view selects three columns, the narrow view reduces columns before losing readable action width, no text or keycap crosses a divider, tooltips expose the exact truncated action/combo content, one-column actions use at most two rows, configured row-height rhythm remains intact, and group order remains contiguous. Close the verification binary, restore `settings.json` byte-for-byte from its backup, and verify both final hashes match their pre-launch values. Do not add the screenshots or temporary backup to Git.
 
-- [ ] **Step 6: Inspect the final repository scope**
+- [x] **Step 6: Inspect the final repository scope**
 
   Run: `git diff --check`, `git status --short --branch -uall`, and a per-file diff review.
 
   Expected: only `src/app.rs` and this plan's checkbox state differ from the committed design baseline; no settings, storage schema, app-sheet, platform, or unrelated files change.
 
-- [ ] **Step 7: Commit verification tracking if it changed**
+- [x] **Step 7: Commit verification tracking if it changed**
 
   Stage the plan and any final test-driven correction in its own coherent commit. Use message `docs: 적응형 오버레이 검증 결과 반영` when only plan tracking changed.
+
+### Verification evidence (2026-07-11)
+
+- Automated gates used the worktree-local `target` and writable `target/task5-temp` for `TEMP`/`TMP`: `cargo fmt -- --check` exited 0; `cargo clippy --all-targets -- -D warnings` exited 0 after a reproduced `needless_range_loop` RED (exit 101) and targeted GREEN; `cargo test --lib ordered_partition` passed 4/4; `cargo test` passed 119/119 with 0 failures and 0 ignored; `cargo build --release` exited 0 with `target/release/cheatsheets.exe`; and `git diff --check` exited 0.
+- Live Windows evidence used the byte-identical `codex-acp.json` fixture. At `1755×873`, the overlay rendered exactly three contiguous ordered columns with no divider or rail crossing; the truncated action showed its exact full tooltip, and the clipped combo tooltip showed exactly `winget install --id Microsoft.IntelligentTerminal -e`. At `920×560`, it rendered one readable vertically scrolling column, clipped oversized combos from the left, had no horizontal overflow, and preserved group order through the final group.
+- Restoration evidence: the original sheet SHA-256 is `EF41095D2846FD97EF0B62ACC2BCB901BA40916C3D8E663AEFA88EF6479F73C2`; restored `settings.json` SHA-256 is `6D7BA88CCF8AC7AE800EB55B073A6814754DF7E4D9104130BABADE5C7FB2D3B9`; both temporary mappings are absent; and only the original `D:\PROJECTS\cheatsheets\target\release\cheatsheets.exe` process is running again.
 
 ## Final Review Gate
 
