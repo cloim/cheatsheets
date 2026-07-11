@@ -1346,8 +1346,8 @@ fn partition_group_ranges(
     };
 
     let mut minimum_tallest = vec![vec![f32::INFINITY; group_count + 1]; column_count + 1];
-    for start in 0..group_count {
-        minimum_tallest[1][start] = range_height(start, group_count);
+    for (start, tallest) in minimum_tallest[1].iter_mut().take(group_count).enumerate() {
+        *tallest = range_height(start, group_count);
     }
     for columns in 2..=column_count {
         for start in (0..=group_count - columns).rev() {
