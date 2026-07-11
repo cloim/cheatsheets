@@ -2024,6 +2024,7 @@ struct PreparedShortcutRow<'a> {
 
 #[derive(Debug, Clone)]
 struct PreparedShortcutGroup<'a> {
+    #[cfg(test)]
     name: String,
     heading_galley: Arc<egui::Galley>,
     rows: Vec<PreparedShortcutRow<'a>>,
@@ -2037,6 +2038,7 @@ struct PreparedShortcutOverlay<'a> {
     groups: Vec<PreparedShortcutGroup<'a>>,
 }
 
+#[cfg(test)]
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct ShortcutRowRenderReport {
@@ -2057,6 +2059,7 @@ struct ShortcutRowRenderReport {
     action_response_id: egui::Id,
 }
 
+#[cfg(test)]
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct ShortcutRenderReport {
@@ -2118,8 +2121,12 @@ fn prepare_shortcut_overlay<'a>(
         .into_iter()
         .zip(combo_runs)
         .map(|((name, entries), combo_runs)| {
+            #[cfg(test)]
+            let heading_text = name.clone();
+            #[cfg(not(test))]
+            let heading_text = name;
             let heading_galley = ui.painter().layout_no_wrap(
-                name.clone(),
+                heading_text,
                 group_heading_font_id(style.group_heading_size),
                 style.palette.group_heading,
             );
@@ -2143,6 +2150,7 @@ fn prepare_shortcut_overlay<'a>(
                 })
                 .collect::<Vec<_>>();
             PreparedShortcutGroup {
+                #[cfg(test)]
                 name,
                 heading_galley,
                 rows,
@@ -2176,7 +2184,22 @@ fn show_shortcut_columns(
     ui: &mut egui::Ui,
     shortcuts: &[ShortcutEntry],
     style: ResolvedOverlayStyle,
-) -> ShortcutRenderReport {
+) {
+    #[cfg(test)]
+    {
+        let mut report = None;
+        render_shortcut_columns(ui, shortcuts, style, &mut report);
+    }
+    #[cfg(not(test))]
+    render_shortcut_columns(ui, shortcuts, style);
+}
+
+fn render_shortcut_columns(
+    ui: &mut egui::Ui,
+    shortcuts: &[ShortcutEntry],
+    style: ResolvedOverlayStyle,
+    #[cfg(test)] report_slot: &mut Option<ShortcutRenderReport>,
+) {
     let palette = style.palette;
     let available_width = ui.available_width().max(0.0);
     let row_item_spacing = ui.spacing().item_spacing.x;
@@ -2243,6 +2266,7 @@ fn show_shortcut_columns(
         }
     }
 
+    #[cfg(test)]
     let mut report = ShortcutRenderReport {
         layout: prepared.layout,
         heading_gap: GROUP_HEADING_GAP,
@@ -2319,7 +2343,9 @@ fn show_shortcut_columns(
                     ui.id().with(("shortcut_action", group_index, row_index)),
                     egui::Sense::hover(),
                 );
+                #[cfg(test)]
                 let combo_response_id = combo_response.id;
+                #[cfg(test)]
                 let action_response_id = action_response.id;
                 let combo_overflowed =
                     paint_prepared_keycap_combo(ui, combo_rect, &row.combo_run, style);
@@ -2337,6 +2363,7 @@ fn show_shortcut_columns(
                     action_response.on_hover_text(full_text);
                 }
 
+                #[cfg(test)]
                 report.rows.push(ShortcutRowRenderReport {
                     group_index,
                     column_index,
@@ -2359,7 +2386,10 @@ fn show_shortcut_columns(
         }
     }
 
-    report
+    #[cfg(test)]
+    {
+        *report_slot = Some(report);
+    }
 }
 
 fn combo_keycap_parts(combo: &str) -> Vec<&str> {
@@ -3024,7 +3054,7 @@ mod tests {
                 .frame(egui::Frame::NONE)
                 .show(ctx, |ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(12.0, 8.0);
-                    report = Some(show_shortcut_columns(ui, shortcuts, style));
+                    render_shortcut_columns(ui, shortcuts, style, &mut report);
                 });
         });
         (
@@ -3039,6 +3069,16 @@ mod tests {
             && (left.top() - right.top()).abs() < EPSILON
             && (left.right() - right.right()).abs() < EPSILON
             && (left.bottom() - right.bottom()).abs() < EPSILON
+    }
+
+    #[test]
+    fn production_shortcut_renderer_returns_no_report() {
+        let shortcuts = canonical_adaptive_shortcuts();
+        let style = canonical_adaptive_style();
+
+        with_font_measurement_ui(|ui| {
+            let _: () = show_shortcut_columns(ui, &shortcuts, style);
+        });
     }
 
     #[test]
@@ -3264,34 +3304,37 @@ mod tests {
     fn renderer_maximum_style_remains_contained() {
         let shortcuts = canonical_adaptive_shortcuts();
         for action_text_y_offset in [-6.0, 6.0] {
-            let ctx = egui::Context::default();
-            install_korean_font(&ctx).expect("production Korean font installation should succeed");
             let style = resolved_overlay_style(
                 &OverlayStyleSettings {
-                    card_padding: 20.0,
-                    group_heading_size: 13.0,
+                    card_padding: 64.0,
+                    group_heading_size: 24.0,
                     action_text_size: 24.0,
                     action_text_y_offset,
                     keycap_text_size: 18.0,
-                    row_height: 18.0,
+                    row_height: 40.0,
                     combo_width: 220.0,
                     action_gap: 32.0,
-                    keycap_height: 16.0,
+                    keycap_height: 28.0,
                     keycap_gap: 16.0,
                     ..Default::default()
                 },
                 0.96,
             );
-            let (output, report) =
-                render_adaptive_overlay_frame(&ctx, &shortcuts, style, 1_715.0, 873.0, None, 0.0);
+            let minimum_content_width = WindowPlacement::MIN_WIDTH - 2.0 * style.card_padding;
+            let wide_ctx = egui::Context::default();
+            install_korean_font(&wide_ctx)
+                .expect("production Korean font installation should succeed");
+            let (wide_output, wide) = render_adaptive_overlay_frame(
+                &wide_ctx, &shortcuts, style, 1_715.0, 873.0, None, 0.0,
+            );
 
-            assert_eq!(report.layout.column_count, 2);
-            assert!(report.layout.action_width >= 0.0);
-            for row in &report.rows {
-                assert!(report.column_rects[row.column_index].contains_rect(row.row_rect));
+            assert_eq!(wide.layout.column_count, 2);
+            assert!(wide.layout.action_width >= wide.layout.target_action_width);
+            for row in &wide.rows {
+                assert!(wide.column_rects[row.column_index].contains_rect(row.row_rect));
                 assert!(row.row_rect.contains_rect(row.action_rect));
                 assert!(row.row_rect.contains_rect(row.combo_rect));
-                let action_shape = output
+                let action_shape = wide_output
                     .shapes
                     .iter()
                     .find(|clipped| {
@@ -3304,6 +3347,29 @@ mod tests {
                     })
                     .expect("maximum style action should be painted");
                 assert!(rects_are_close(action_shape.clip_rect, row.action_rect));
+            }
+
+            let minimum_ctx = egui::Context::default();
+            install_korean_font(&minimum_ctx)
+                .expect("production Korean font installation should succeed");
+            let (_, minimum) = render_adaptive_overlay_frame(
+                &minimum_ctx,
+                &shortcuts,
+                style,
+                minimum_content_width,
+                WindowPlacement::MIN_HEIGHT,
+                None,
+                0.0,
+            );
+
+            assert_eq!(minimum_content_width, 792.0);
+            assert_eq!(minimum.layout.column_count, 1);
+            assert!(minimum.layout.action_width >= minimum.layout.target_action_width);
+            assert!(minimum.rows.iter().all(|row| row.action_max_rows == 2));
+            for row in &minimum.rows {
+                assert!(minimum.column_rects[row.column_index].contains_rect(row.row_rect));
+                assert!(row.row_rect.contains_rect(row.action_rect));
+                assert!(row.row_rect.contains_rect(row.combo_rect));
             }
         }
     }
